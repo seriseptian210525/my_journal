@@ -1,0 +1,262 @@
+============================================================
+ACTUAL GOOGLE SHEET COLUMN STRUCTURE LOG
+============================================================
+
+
+============================================================
+📊 S1: Form Service
+============================================================
+Total Columns: 27
+Column List:
+   1. 'Timestamp'
+   2. 'Lokasi Pool'
+   3. 'Bike Model'
+   4. 'Nama Driver (1)'
+   5. 'Nama Driver'
+   6. 'Driver Category'
+   7. 'ODO / KM'
+   8. 'Plate Number (1)'
+   9. 'Plate Number'
+  10. 'Tanggal Service'
+  11. 'Mechanic Name'
+  12. 'Jam Registrasi'
+  13. 'Jam Mulai Service'
+  14. 'Jam Selesai Service'
+  15. 'Jam Serah Terima Unit ke Driver'
+  16. 'Mechanic Action Category'
+  17. 'Keluhan Driver'
+  18. 'Tindakan Dari Mekanik'
+  19. 'Total Biaya Perbaikan'
+  20. 'Apakah Ada Pergantian Part H5'
+  21. 'Apakah Ada Pergantian Part H3'
+  22. 'Nama Part yang diganti'
+  23. 'Part lain yang diganti (1)'
+  24. 'Part lain yang diganti (2)'
+  25. 'Part lain yang diganti (3)'
+  26. 'Part lain yang diganti (4)'
+  27. 'Part lain yang diganti (5)'
+
+PYTHON LIST FORMAT:
+S1: Form Service.columns = ['Timestamp', 'Lokasi Pool', 'Bike Model', 'Nama Driver (1)', 'Nama Driver', 'Driver Category', 'ODO / KM', 'Plate Number (1)', 'Plate Number', 'Tanggal Service', 'Mechanic Name', 'Jam Registrasi', 'Jam Mulai Service', 'Jam Selesai Service', 'Jam Serah Terima Unit ke Driver', 'Mechanic Action Category', 'Keluhan Driver', 'Tindakan Dari Mekanik', 'Total Biaya Perbaikan', 'Apakah Ada Pergantian Part H5', 'Apakah Ada Pergantian Part H3', 'Nama Part yang diganti', 'Part lain yang diganti (1)', 'Part lain yang diganti (2)', 'Part lain yang diganti (3)', 'Part lain yang diganti (4)', 'Part lain yang diganti (5)']
+
+
+============================================================
+📊 S2: Service Grab
+============================================================
+Total Columns: 21
+Column List:
+   1. 'Timestamp'
+   2. 'Tanggal'
+   3. 'Nama Mekanik'
+   4. 'Tipe Motor'
+   5. 'Plat Nomor'
+   6. 'ODO / Kilometer'
+   7. 'Status Unit'
+   8. 'Kendala Unit'
+   9. 'Tindakan perbaikan dari Mekanik?'
+  10. 'Apakah ada pergantian sparepart?'
+  11. 'Consummable Part yang diganti'
+  12. 'Sparepart lain yang diganti'
+  13. '2. Part lain yang diganti'
+  14. '3. Part lain yang diganti'
+  15. '4. Part lain yang diganti'
+  16. '5. Part lain yang diganti'
+  17. 'Email address'
+  18. 'Lokasi Service'
+  19. 'Foto Tampak Depan (Nopol Jelas)'
+  20. 'Column 18'
+  21. 'Sparepart yang diganti'
+
+PYTHON LIST FORMAT:
+S2: Service Grab.columns = ['Timestamp', 'Tanggal', 'Nama Mekanik', 'Tipe Motor', 'Plat Nomor', 'ODO / Kilometer', 'Status Unit', 'Kendala Unit', 'Tindakan perbaikan dari Mekanik?', 'Apakah ada pergantian sparepart?', 'Consummable Part yang diganti', 'Sparepart lain yang diganti', '2. Part lain yang diganti', '3. Part lain yang diganti', '4. Part lain yang diganti', '5. Part lain yang diganti', 'Email address', 'Lokasi Service', 'Foto Tampak Depan (Nopol Jelas)', 'Column 18', 'Sparepart yang diganti']
+
+
+============================================================
+📊 S3: Form Responses
+============================================================
+Total Columns: 33
+Column List:
+   1. 'Timestamp'
+   2. 'Lokasi Pool'
+   3. 'Nama Driver'
+   4. 'Driver Category'
+   5. 'Tanggal Service'
+   6. 'Plate Number'
+   7. 'ODO / KM'
+   8. 'Mechanic Action Category'
+   9. 'Mechanic Name'
+  10. 'Jam Registrasi'
+  11. 'Jam Mulai Service'
+  12. 'Jam Selesai Service'
+  13. 'Jam Serah Terima Unit ke Driver'
+  14. 'Keluhan Driver'
+  15. 'Tindakan dari Mekanik'
+  16. 'Bike Model'
+  17. 'Apakah Ada Pergantian Part H5'
+  18. 'Apakah Ada Pergantian Part H3'
+  19. 'Fast Moving Part (H5)'
+  20. 'Medium Moving Part (H5)'
+  21. 'Slow Moving Part (H5)'
+  22. 'Fast Moving Part (H3)'
+  23. 'Medium Moving Part (H3)'
+  24. 'Slow Moving Part (H3)'
+  25. 'Category Kerusakan'
+  26. 'Total Biaya Perbaikan '
+  27. 'Perbaikan dari Mekanik'
+  28. 'Apakah Ada Pergantian Part H1'
+  29. 'Fast Moving Part (H1)'
+  30. 'Medium Moving Part (H1)'
+  31. 'Slow Moving Part (H1)'
+  32. 'Perbaikan yang dilakukan'
+  33. 'Column 29'
+
+PYTHON LIST FORMAT:
+S3: Form Responses.columns = ['Timestamp', 'Lokasi Pool', 'Nama Driver', 'Driver Category', 'Tanggal Service', 'Plate Number', 'ODO / KM', 'Mechanic Action Category', 'Mechanic Name', 'Jam Registrasi', 'Jam Mulai Service', 'Jam Selesai Service', 'Jam Serah Terima Unit ke Driver', 'Keluhan Driver', 'Tindakan dari Mekanik', 'Bike Model', 'Apakah Ada Pergantian Part H5', 'Apakah Ada Pergantian Part H3', 'Fast Moving Part (H5)', 'Medium Moving Part (H5)', 'Slow Moving Part (H5)', 'Fast Moving Part (H3)', 'Medium Moving Part (H3)', 'Slow Moving Part (H3)', 'Category Kerusakan', 'Total Biaya Perbaikan ', 'Perbaikan dari Mekanik', 'Apakah Ada Pergantian Part H1', 'Fast Moving Part (H1)', 'Medium Moving Part (H1)', 'Slow Moving Part (H1)', 'Perbaikan yang dilakukan', 'Column 29']
+
+
+============================================================
+📊 S4: Request SPK
+============================================================
+Total Columns: 40
+Column List:
+   1. 'Nomor Servis'
+   2. 'Tanggal Laporan'
+   3. 'Nomer Mesin'
+   4. 'Nomer Rangka'
+   5. 'Nama Driver'
+   6. 'Nomer Telepon Driver'
+   7. 'Tipe Motor'
+   8. 'Plat Nomor'
+   9. 'Odo / Kilometer'
+  10. 'Kendala Unit'
+  11. 'Alamat Email'
+  12. 'Item Suspect'
+  13. 'Tempat Sewa Unit'
+  14. 'Foto Kerusakan'
+  15. 'Foto Odo / Kilometer'
+  16. 'Tanggal Konfirmasi'
+  17. 'Catatan Hasil Konfirmasi'
+  18. 'Nama Sparepart'
+  19. 'Harga Part'
+  20. 'Jasa'
+  21. 'Konfirmasi Pembayaran'
+  22. 'Bukti Bayar'
+  23. 'Bengkel Tujuan'
+  24. 'Alamat Bengkel'
+  25. 'Nama Bengkel'
+  26. 'Nama Cabang Bengkel'
+  27. 'Tanggal Terbit SPK'
+  28. 'Nomor SPK'
+  29. 'Tanggal Service di Bengkel'
+  30. 'Tanggal Survey CSAT'
+  31. 'Nilai CSAT (1 s.d. 5)'
+  32. 'Tgl Service by konfirmasi'
+  33. 'Keterangan'
+  34. 'Complain'
+  35. 'Detail Complain'
+  36. 'Status'
+  37. 'Buat SPK'
+  38. 'Cetak SPK'
+  39. 'Item Pengerjaan'
+  40. 'Status SPK'
+
+PYTHON LIST FORMAT:
+S4: Request SPK.columns = ['Nomor Servis', 'Tanggal Laporan', 'Nomer Mesin', 'Nomer Rangka', 'Nama Driver', 'Nomer Telepon Driver', 'Tipe Motor', 'Plat Nomor', 'Odo / Kilometer', 'Kendala Unit', 'Alamat Email', 'Item Suspect', 'Tempat Sewa Unit', 'Foto Kerusakan', 'Foto Odo / Kilometer', 'Tanggal Konfirmasi', 'Catatan Hasil Konfirmasi', 'Nama Sparepart', 'Harga Part', 'Jasa', 'Konfirmasi Pembayaran', 'Bukti Bayar', 'Bengkel Tujuan', 'Alamat Bengkel', 'Nama Bengkel', 'Nama Cabang Bengkel', 'Tanggal Terbit SPK', 'Nomor SPK', 'Tanggal Service di Bengkel', 'Tanggal Survey CSAT', 'Nilai CSAT (1 s.d. 5)', 'Tgl Service by konfirmasi', 'Keterangan', 'Complain', 'Detail Complain', 'Status', 'Buat SPK', 'Cetak SPK', 'Item Pengerjaan', 'Status SPK']
+
+
+============================================================
+📊 S5: After Repair
+============================================================
+Total Columns: 7
+Column List:
+   1. 'Tanggal'
+   2. 'Plat Kendaraan / Vin'
+   3. 'Sparepart yang diganti - H3 ONLY'
+   4. 'Nama Mekanik'
+   5. 'Type Motor'
+   6. 'Sparepart yang diganti - H5 ONLY'
+   7. 'Sparepart yang diganti - H1 ONLY'
+
+PYTHON LIST FORMAT:
+S5: After Repair.columns = ['Tanggal', 'Plat Kendaraan / Vin', 'Sparepart yang diganti - H3 ONLY', 'Nama Mekanik', 'Type Motor', 'Sparepart yang diganti - H5 ONLY', 'Sparepart yang diganti - H1 ONLY']
+
+
+============================================================
+📊 S6: Cabang Kembangan
+============================================================
+Total Columns: 13
+Column List:
+   1. 'Timestamp'
+   2. 'Checker / Repair'
+   3. 'Bike Type'
+   4. 'Date Check'
+   5. 'Plate Number'
+   6. 'Bike Status Condition'
+   7. 'Date Bike Repair'
+   8. 'Problem'
+   9. 'Repair Action'
+  10. 'Bike Condition'
+  11. 'SparePart Changes'
+  12. 'SparePart Name'
+  13. 'Bike Condition After Repair'
+
+PYTHON LIST FORMAT:
+S6: Cabang Kembangan.columns = ['Timestamp', 'Checker / Repair', 'Bike Type', 'Date Check', 'Plate Number', 'Bike Status Condition', 'Date Bike Repair', 'Problem', 'Repair Action', 'Bike Condition', 'SparePart Changes', 'SparePart Name', 'Bike Condition After Repair']
+
+
+============================================================
+📊 S7: Cabang Depok
+============================================================
+Total Columns: 26
+Column List:
+   1. 'No'
+   2. 'Column 1'
+   3. 'Nama Driver'
+   4. 'Driver Category'
+   5. 'ODO / KM'
+   6. 'Plat Number'
+   7. 'Date'
+   8. 'Mechanic Name'
+   9. 'Mechanic Action Category'
+  10. 'Jam Registrasi'
+  11. 'Jam mulai service'
+  12. 'Jam Selesai Service'
+  13. 'Jam Serah terima Unit ke Driver'
+  14. 'Keluhan dari Driver'
+  15. 'Tindakan Perbaikan dari Mechanic'
+  16. 'Apakah ada penggantian part?'
+  17. 'Consumable Part yang Diganti H3'
+  18. 'Consumable Part yang Diganti H5'
+  19. 'Consumable Part yang Diganti ALL'
+  20. 'Part lain yang di ganti (1)'
+  21. 'Part lain yang di ganti (2)'
+  22. 'Part lain yang di ganti (3)'
+  23. 'Part lain yang di ganti (4)'
+  24. 'Part lain yang di ganti (5)'
+  25. 'Biaya Perbaikan'
+  26. 'Email address'
+
+PYTHON LIST FORMAT:
+S7: Cabang Depok.columns = ['No', 'Column 1', 'Nama Driver', 'Driver Category', 'ODO / KM', 'Plat Number', 'Date', 'Mechanic Name', 'Mechanic Action Category', 'Jam Registrasi', 'Jam mulai service', 'Jam Selesai Service', 'Jam Serah terima Unit ke Driver', 'Keluhan dari Driver', 'Tindakan Perbaikan dari Mechanic', 'Apakah ada penggantian part?', 'Consumable Part yang Diganti H3', 'Consumable Part yang Diganti H5', 'Consumable Part yang Diganti ALL', 'Part lain yang di ganti (1)', 'Part lain yang di ganti (2)', 'Part lain yang di ganti (3)', 'Part lain yang di ganti (4)', 'Part lain yang di ganti (5)', 'Biaya Perbaikan', 'Email address']
+
+
+============================================================
+📊 S8: Cabang Bekasi
+============================================================
+Total Columns: 12
+Column List:
+   1. 'Timestamp'
+   2. 'Tanggal'
+   3. 'Type Motor'
+   4. 'Plat Kendaraan / VIN'
+   5. 'Sparepart yang diganti - H3 ONLY'
+   6. 'Sparepart yang diganti - H5 ONLY'
+   7. 'Nama Mekani'
+   8. 'Status Unit'
+   9. 'Perbaikan & Rpc'
+  10. 'ALL SPAREPART'
+  11. 'BAHAN BAKU'
+  12. 'Column 8'
+
+PYTHON LIST FORMAT:
+S8: Cabang Bekasi.columns = ['Timestamp', 'Tanggal', 'Type Motor', 'Plat Kendaraan / VIN', 'Sparepart yang diganti - H3 ONLY', 'Sparepart yang diganti - H5 ONLY', 'Nama Mekani', 'Status Unit', 'Perbaikan & Rpc', 'ALL SPAREPART', 'BAHAN BAKU', 'Column 8']

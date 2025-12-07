@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Secrets
+.env
+*.json
+!package.json
+secrets.toml
+.streamlit/secrets.toml
+.ipynb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+projects/*/credentials/
+projects/my_etl_project/output/
+projects/my_etl_project/src/_legacy_backup/
+projects/my_etl_project/tests/latest_validation_summary.txt

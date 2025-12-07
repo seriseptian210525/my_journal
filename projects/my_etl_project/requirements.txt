@@ -1,0 +1,6 @@
+pandas
+gspread
+oauth2client
+python-dotenv
+snowflake-id
+rapidfuzz
