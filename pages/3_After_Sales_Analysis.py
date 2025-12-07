@@ -63,7 +63,7 @@ if not df.empty:
     # Preprocessing for View
     if 'created_at' in df.columns:
         df['created_at'] = pd.to_datetime(df['created_at'], errors='coerce')
-        df = df.sort_values(by='created_at', ascending=True)
+        df = df.sort_values(by='created_at', ascending=True).reset_index(drop=True)
 
     # Display
     st.dataframe(
