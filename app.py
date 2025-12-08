@@ -52,9 +52,9 @@ with col2:
         st.markdown("**Page 4**")
         st.warning("Analisa layanan Emergency Roadside Assistance (ERA), response time, dan distribusi kejadian.")
 
-    with st.expander("📈 Growth & Engagement", expanded=True):
+    with st.expander("✨ Quality Improvement", expanded=True):
         st.markdown("**Page 5**")
-        st.info("Analisa pertumbuhan user, retensi, dan tingkat interaksi (engagement) pada platform.")
+        st.info("Metrik untuk rekomendasi peningkatan berkelanjutan terkait product dari sisi operation (Defect Rate, MTBF).")
 
 
 # Footer/Sidebar Info
