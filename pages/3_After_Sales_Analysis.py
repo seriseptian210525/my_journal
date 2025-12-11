@@ -4,16 +4,18 @@ import os
 import sys
 
 # --- Path Integration for Shared Modules ---
-# Add ETL project root to path so we can import src.common
-etl_project_path = os.path.join(os.getcwd(), "projects", "my_etl_project")
-if etl_project_path not in sys.path:
-    sys.path.append(etl_project_path)
+# Since app.py is at root and standard running is 'streamlit run app.py', 
+# root is usually in sys.path. 
+# Explicitly adding root just in case.
+current_dir = os.getcwd()
+if current_dir not in sys.path:
+    sys.path.append(current_dir)
 
 try:
     from src.common.data_loader import DataLoader
     from src.common.config import SHEET_ID_OUTPUT, WORKSHEET_OUTPUT
 except ImportError as e:
-    st.error(f"Failed to import ETL modules. Make sure 'projects/my_etl_project' exists. Error: {e}")
+    st.error(f"Failed to import ETL modules. Ensure running from project root. Error: {e}")
     st.stop()
 
 st.set_page_config(page_title="After Sales Analysis", layout="wide")
@@ -47,7 +49,7 @@ if data_source == "Google Sheets (Live)":
         st.success(f"Loaded {len(df)} rows from Cloud.")
 
 else: # Local CSV
-    DATA_PATH = os.path.join("projects", "my_etl_project", "output", "final_historical_data.csv")
+    DATA_PATH = os.path.join("output", "final_historical_data.csv")
     if os.path.exists(DATA_PATH):
         df = pd.read_csv(DATA_PATH)
     else:
