@@ -133,7 +133,7 @@ class OdometerProcessor:
         # MERGE DELIVERY DATE
         if df_asset_list is not None:
             print("   -> Merging Delivery Dates from Asset List...")
-            vin_elsa = "vechicle_vin"
+            vin_elsa = "vehicle_vin"
             vin_asset = self.config.COL_ASSET_VIN
             col_delivery = self.config.COL_ASSET_DELIVERY
             
@@ -162,13 +162,13 @@ class OdometerProcessor:
         except: 
             pass
         
-        df = df.sort_values(["vechicle_vin", "created_at"])
+        df = df.sort_values(["vehicle_vin", "created_at"])
         df["odometer_stage1"] = df["odometer_raw"]
         df.loc[df["odometer_stage1"] < 0, "odometer_stage1"] = np.nan
 
         # STEP 1 & 2: Delta & Flagging
-        df["delta_days"] = df.groupby("vechicle_vin")["created_at"].diff().dt.total_seconds().div(86400)
-        df["delta_odo"] = df.groupby("vechicle_vin")["odometer_stage1"].diff()
+        df["delta_days"] = df.groupby("vehicle_vin")["created_at"].diff().dt.total_seconds().div(86400)
+        df["delta_odo"] = df.groupby("vehicle_vin")["odometer_stage1"].diff()
         df["km_per_day"] = df["delta_odo"] / df["delta_days"]
 
         df["is_anomaly_rule"] = False
@@ -177,7 +177,7 @@ class OdometerProcessor:
 
         # STEP 3: Impute Flag
         df["needs_impute"] = False
-        first_idx = df.groupby("vechicle_vin").head(1).index
+        first_idx = df.groupby("vehicle_vin").head(1).index
         zero_mid = (df["odometer_stage1"] == 0) & (~df.index.isin(first_idx))
         null_mask = df["odometer_stage1"].isna()
         anomaly_mask = df["is_anomaly_rule"]
@@ -185,7 +185,7 @@ class OdometerProcessor:
 
         # STEP 4: Smart Repair
         print("   -> Running Smart Monotonic Repair (with Rounding)...")
-        df_cleaned = df.groupby("vechicle_vin", group_keys=False).apply(self._repair_group)
+        df_cleaned = df.groupby("vehicle_vin", group_keys=False).apply(self._repair_group)
         
         print("Odometer Cleaning Pipeline Completed.")
         return df_cleaned

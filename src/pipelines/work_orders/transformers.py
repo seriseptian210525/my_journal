@@ -162,8 +162,8 @@ class ServiceDataPipeline:
             'vehicle_license_plate', 'odometer', 'service_location_name', 
             'bike_type', 'item_name', 'customer_name', 'service_type', 
             'order_status', 'customer_problems', 'action_description', 
-            'completed_by', 'total_price', 'data_source', 'vechicle_vin', 
-            'vechicle_engine', 'color', 'customer_type', 'driver_category'
+            'completed_by', 'total_price', 'data_source', 'vehicle_vin', 
+            'vehicle_engine', 'color', 'customer_type', 'driver_category'
         ]
         for c in final_cols:
             if c not in df.columns: df[c] = None
@@ -274,19 +274,19 @@ class ServiceDataEnricher:
         """Repair Identities & Fuzzy Match & Recovery"""
         print("🚀 Repairing Identities & Cleaning Bad Data...")
         
-        for c in ['vechicle_vin', 'vechicle_engine', 'color', 'customer_type', 'bike_type', 'driver_category']:
+        for c in ['vehicle_vin', 'vehicle_engine', 'color', 'customer_type', 'bike_type', 'driver_category']:
             if c not in self.df.columns: self.df[c] = np.nan
 
         self.df['plat_clean'] = self.df['vehicle_license_plate'].astype(str).apply(ServiceUtils.format_plat_nomor).fillna('').str.strip().str.upper()
 
         # 1. Exact Match
-        self.df['vechicle_vin'] = self.df['vechicle_vin'].fillna(self.df['plat_clean'].map(self.vin_map))
-        self.df['vechicle_engine'] = self.df['vechicle_engine'].fillna(self.df['plat_clean'].map(self.engine_map))
+        self.df['vehicle_vin'] = self.df['vehicle_vin'].fillna(self.df['plat_clean'].map(self.vin_map))
+        self.df['vehicle_engine'] = self.df['vehicle_engine'].fillna(self.df['plat_clean'].map(self.engine_map))
         self.df['color'] = self.df['color'].fillna(self.df['plat_clean'].map(self.color_map))
         self.df['driver_category'] = self.df['driver_category'].fillna(self.df['plat_clean'].map(self.driver_cat_map))
 
         # 2. Fuzzy Match
-        mask_still_missing = self.df['vechicle_vin'].isna()
+        mask_still_missing = self.df['vehicle_vin'].isna()
         unique_missing = self.df.loc[mask_still_missing, 'plat_clean'].unique()
         
         corrected_map = {}
@@ -301,19 +301,19 @@ class ServiceDataEnricher:
                 mask_fix = self.df['plat_clean'] == bad
                 self.df.loc[mask_fix, 'vehicle_license_plate'] = good
                 self.df.loc[mask_fix, 'plat_clean'] = good
-                self.df.loc[mask_fix, 'vechicle_vin'] = self.vin_map.get(good)
-                self.df.loc[mask_fix, 'vechicle_engine'] = self.engine_map.get(good)
+                self.df.loc[mask_fix, 'vehicle_vin'] = self.vin_map.get(good)
+                self.df.loc[mask_fix, 'vehicle_engine'] = self.engine_map.get(good)
                 self.df.loc[mask_fix, 'color'] = self.color_map.get(good)
                 self.df.loc[mask_fix, 'driver_category'] = self.driver_cat_map.get(good)
 
         # 3. Recovery Strategy (Customer History)
-        mask_invalid = self.df['vechicle_vin'].isna()
+        mask_invalid = self.df['vehicle_vin'].isna()
         if mask_invalid.any():
             print(f"   - Attempting to recover {mask_invalid.sum()} rows using customer history...")
             self._recover_dropped_rows(mask_invalid)
             
         # 4. Log Bad Data (Final Check)
-        mask_invalid = self.df['vechicle_vin'].isna()
+        mask_invalid = self.df['vehicle_vin'].isna()
         
         # [NEW] Retain B2C even if invalid plate
         mask_b2c = self.df['driver_category'].astype(str).str.contains('B2C', case=False, na=False)
@@ -367,8 +367,8 @@ class ServiceDataEnricher:
                 if recovered_plate_clean in self.vin_map:
                     self.df.at[idx, 'vehicle_license_plate'] = recovered_plate
                     self.df.at[idx, 'plat_clean'] = recovered_plate_clean
-                    self.df.at[idx, 'vechicle_vin'] = self.vin_map[recovered_plate_clean]
-                    self.df.at[idx, 'vechicle_engine'] = self.engine_map.get(recovered_plate_clean)
+                    self.df.at[idx, 'vehicle_vin'] = self.vin_map[recovered_plate_clean]
+                    self.df.at[idx, 'vehicle_engine'] = self.engine_map.get(recovered_plate_clean)
                     self.df.at[idx, 'color'] = self.color_map.get(recovered_plate_clean)
                     self.df.at[idx, 'driver_category'] = self.driver_cat_map.get(recovered_plate_clean)
                     recovered_count += 1
@@ -516,7 +516,7 @@ class ServiceDataEnricher:
         self.df['created_at'] = pd.to_datetime(self.df['created_at'])
         
         # Sort to ensure consistent sequencing
-        self.df = self.df.sort_values(['created_at', 'vechicle_vin'])
+        self.df = self.df.sort_values(['created_at', 'vehicle_vin'])
         
         # Generate sequence (0 to N) for each identical timestamp
         # Using cumcount to get unique sequence for same timestamp
@@ -584,7 +584,7 @@ class ServiceDataEnricher:
         """
         Soft cleaning odometer (mileage consumption), kolom wajib:
           - 'created_at'
-          - 'vechicle_vin'
+          - 'vehicle_vin'
           - 'odometer'
 
         [ENHANCED] Menggunakan Delivery Date dari Asset List untuk estimasi Cold Start.
@@ -624,13 +624,13 @@ class ServiceDataEnricher:
                 df_asset_clean = df_asset_clean.drop_duplicates(subset=['VIN'])
                 
                 # Prepare ELSA Key
-                df['vechicle_vin'] = df['vechicle_vin'].astype(str).str.strip()
+                df['vehicle_vin'] = df['vehicle_vin'].astype(str).str.strip()
                 
                 # Merge
                 df = pd.merge(
                     df, 
                     df_asset_clean, 
-                    left_on='vechicle_vin', 
+                    left_on='vehicle_vin', 
                     right_on='VIN', 
                     how='left'
                 )
@@ -648,7 +648,7 @@ class ServiceDataEnricher:
             df[delivery_date_col] = pd.NaT
 
         # ===== STANDARD CLEANING LOGIC =====
-        df = df.sort_values(["vechicle_vin", "created_at"])
+        df = df.sort_values(["vehicle_vin", "created_at"])
         df["odometer_stage1"] = df["odometer_raw"]
 
         # odometer negatif = invalid
@@ -657,12 +657,12 @@ class ServiceDataEnricher:
 
         # ===== hitung konsumsi mileage per hari =====
         df["delta_days"] = (
-            df.groupby("vechicle_vin")["created_at"]
+            df.groupby("vehicle_vin")["created_at"]
             .diff()
             .dt.total_seconds()
             .div(86400)
         )
-        df["delta_odo"] = df.groupby("vechicle_vin")["odometer_stage1"].diff()
+        df["delta_odo"] = df.groupby("vehicle_vin")["odometer_stage1"].diff()
 
         # ini adalah KONSUMSI MILEAGE per hari (km/hari), bukan speed
         df["daily_mileage"] = df["delta_odo"] / df["delta_days"]
@@ -683,8 +683,8 @@ class ServiceDataEnricher:
         print("   -> Detecting statistical outliers (IQR method)...")
         df["is_statistical_outlier"] = False
 
-        for vin in df["vechicle_vin"].unique():
-            mask = df["vechicle_vin"] == vin
+        for vin in df["vehicle_vin"].unique():
+            mask = df["vehicle_vin"] == vin
             vehicle_values = df.loc[mask, "odometer_stage1"].dropna()
             
             if len(vehicle_values) >= 4:  # Need at least 4 values for meaningful IQR
@@ -715,7 +715,7 @@ class ServiceDataEnricher:
 
         # ===== tentukan mana yang perlu imputasi =====
         df["needs_impute"] = False
-        first_idx = df.groupby("vechicle_vin").head(1).index
+        first_idx = df.groupby("vehicle_vin").head(1).index
 
         zero_mid = (df["odometer_stage1"] == 0) & (~df.index.isin(first_idx))
         null_mask = df["odometer_stage1"].isna()

@@ -145,7 +145,7 @@ def run_work_order_pipeline():
     
     business_df = final_df.drop(columns=[c for c in tech_columns if c in final_df.columns], errors='ignore').copy()
     
-    key_cols = ['order_id', 'created_at', 'vechicle_vin', 'vehicle_license_plate']
+    key_cols = ['order_id', 'created_at', 'vehicle_vin', 'vehicle_license_plate']
     tech_cols_to_use = [c for c in tech_columns if c in final_df.columns]
     tech_df = final_df[key_cols + tech_cols_to_use].copy()
     
