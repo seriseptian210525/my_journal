@@ -1,5 +1,7 @@
-# Environment Variables
+# Environment Variables & Secrets
 .env
+env.yaml
+credentials/
 
 # Output Data (Local Testing Only)
 output/*.csv
