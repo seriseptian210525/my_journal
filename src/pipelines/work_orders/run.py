@@ -155,14 +155,18 @@ def run_work_order_pipeline():
     print("\n💾 Exporting Results...")
     
     if SAVE_LOCAL_CSV:
-        business_df.to_csv('final_historical_data.csv', index=False)
-        tech_df.to_csv('cleaning_tech_log.csv', index=False)
-        print(f"✅ Main Data saved ({len(business_df)} rows)")
-        print(f"✅ Tech Log saved ({len(tech_df)} rows)")
+        # Define output directory
+        output_dir = os.path.join(os.getcwd(), 'output')
+        os.makedirs(output_dir, exist_ok=True)
+        
+        business_df.to_csv(os.path.join(output_dir, 'final_historical_data.csv'), index=False)
+        tech_df.to_csv(os.path.join(output_dir, 'cleaning_tech_log.csv'), index=False)
+        print(f"✅ Main Data saved to output/final_historical_data.csv ({len(business_df)} rows)")
+        print(f"✅ Tech Log saved to output/cleaning_tech_log.csv ({len(tech_df)} rows)")
 
         if not bad_data_df.empty:
-            bad_data_df.to_csv('bad_data.csv', index=False)
-            print(f"⚠️ Bad Data saved ({len(bad_data_df)} rows)")
+            bad_data_df.to_csv(os.path.join(output_dir, 'bad_data.csv'), index=False)
+            print(f"⚠️ Bad Data saved to output/bad_data.csv ({len(bad_data_df)} rows)")
     else:
         print("ℹ️ Local CSV export SKIPPED (SAVE_LOCAL_CSV=False)")
     

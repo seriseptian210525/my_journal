@@ -9,6 +9,15 @@ WORKER_ID = 1
 DATACENTER_ID = 1
 SNOWFLAKE_EPOCH = datetime.datetime(2024, 1, 1)
 
+env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+load_dotenv(dotenv_path=env_path)
+
+# Fallback to env.yaml if .env doesn't have data (User uses env.yaml with .env syntax)
+if not os.getenv("SHEET_ID_ASSET_LIST"):
+    yaml_path = Path(__file__).resolve().parent.parent.parent / "env.yaml"
+    if yaml_path.exists():
+        load_dotenv(dotenv_path=yaml_path)
+
 # --- Service Category Mapping ---
 SERVICE_TYPE_MAPPING = {
     'Interval Service': 'Regular',
@@ -129,8 +138,20 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # Credentials
 SERVICE_ACCOUNT_FILE = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+
+# Auto-discovery fallback
+if not SERVICE_ACCOUNT_FILE:
+    print("DEBUG: GOOGLE_APPLICATION_CREDENTIALS not found in env. Searching credentials/ directory...")
+    cred_dir = BASE_DIR / "credentials"
+    if cred_dir.exists():
+        json_files = list(cred_dir.glob("*.json"))
+        if json_files:
+            SERVICE_ACCOUNT_FILE = json_files[0]
+            print(f"DEBUG: Found credential file: {SERVICE_ACCOUNT_FILE}")
+
 if SERVICE_ACCOUNT_FILE and not os.path.isabs(SERVICE_ACCOUNT_FILE):
     SERVICE_ACCOUNT_FILE = BASE_DIR / SERVICE_ACCOUNT_FILE
+
 
 # IDs
 SHEET_ID_FORM_SERVICE = os.getenv("SHEET_ID_FORM_SERVICE")

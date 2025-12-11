@@ -3,7 +3,8 @@ import sys
 import os
 
 # Add project root to python path to ensure imports work
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Current file is in entrypoint/, we need to go up one level to reach src/
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import argparse
 

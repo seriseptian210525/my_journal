@@ -5,27 +5,28 @@ This project follows a modular ETL architecture designed for scalability and mai
 ## 📂 Directory Layout
 
 ```
+## 📂 Directory Layout
+
+```
 ├── .github/                   # GitHub Actions and workflows
-├── docs/                      # Documentation files
+├── docs/                      # Documentation files (.md, .txt)
+├── entrypoint/                # Main Orchestrator Entry Points
+│   └── run_pipeline.py        # Centralized CLI Runner
+│
+├── notebook/                  # Jupyter Notebooks for analysis
+│   ├── ADVANCED_HISTORICAL_SERVICE.ipynb
+│   └── [ELSA]_Kamus_Keluhan.ipynb
+│
+├── output/                    # Pipeline Outputs (CSVs)
+│   ├── final_historical_data.csv
+│   └── cleaning_tech_log.csv
+│
 ├── src/                       # Source Code
 │   ├── common/                # Shared utilities and configurations
-│   │   ├── config.py          # Configuration constants (Sheet IDs, mappings)
-│   │   ├── data_loader.py     # GSheet connection & loading logic
-│   │   └── utils.py           # Shared helper functions (Date parsing, ID generation)
-│   │   
-│   ├── pipelines/             # Modular pipelines
-│   │   └── work_orders/       # Main Work Order Processing Pipeline
-│   │       ├── run.py                 # Pipeline Orchestrator (Runner)
-│   │       ├── transformers.py        # Core Transformation Logic
-│   │       ├── odometer_processor.py  # Specific Odometer Logic
-│   │       └── complaint_cleaner.py   # NLP/Regex Complaint Cleaning
-│   │
-│   └── main.py                # Main Entry Point (Wrapper for work_orders pipeline)
+│   └── pipelines/             # Modular pipelines
+│       └── work_orders/       # Main Work Order Processing Pipeline
 │
-├── tests/                     # Integration and Unit Tests
-│   └── integration_test_etl.py
-│
-├── run_pipeline.py            # CLI Utility to run specific pipelines (extensible)
+├── app.py                     # Streamlit Dashboard Entry Point (Root)
 ├── requirements.txt           # Python dependencies
 └── README.md                  # Project overview
 ```
@@ -33,10 +34,13 @@ This project follows a modular ETL architecture designed for scalability and mai
 ## 🔑 Key Modules
 
 ### 1. Entry Points
-- **`src/main.py`**: The primary entry point. Runs the default Work Order pipeline.
-  - Usage: `python -m src.main`
-- **`run_pipeline.py`**: CLI tool for running specific pipelines (useful when multiple pipelines exist).
-  - Usage: `python run_pipeline.py --pipeline work_orders`
+- **`entrypoint/run_pipeline.py`**: The main orchestrator for ETL pipelines.
+  - Usage: `python entrypoint/run_pipeline.py --pipeline work_orders`
+- **`app.py`**: The entry point for the Streamlit Dashboard.
+  - Usage: `streamlit run app.py`
+
+### 2. Output
+- **`output/`**: All ETL artifacts (reports, clean data, bad data logs) are saved here.
 
 ### 2. Common (`src/common/`)
 - **`config.py`**: Centralized configuration. **Edit this file** to change Google Sheet IDs or column mappings.
