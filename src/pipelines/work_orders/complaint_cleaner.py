@@ -184,8 +184,12 @@ class ComplaintCleaner:
         # Fill empty clean problems with original? Or keep empty?
         # Usually for analysis, we want mapped data. The unmapped remains as is in original column.
         # But if the user wants "cleaner output", maybe we fallback to original if cleaned is empty.
-        mask_empty = df['customer_problems_clean'] == ""
-        df.loc[mask_empty, 'customer_problems_clean'] = df.loc[mask_empty, col_name] # Fallback
+        # [UPDATED] Use strict replacement. Do not fallback to original.
+        # mask_empty = df['customer_problems_clean'] == ""
+        # df.loc[mask_empty, 'customer_problems_clean'] = df.loc[mask_empty, col_name] # Fallback
+        
+        # Ensure we fill NaN with empty string if any
+        df['customer_problems_clean'] = df['customer_problems_clean'].fillna("")
         
         print("✅ Complaint cleaning completed.")
         return df
