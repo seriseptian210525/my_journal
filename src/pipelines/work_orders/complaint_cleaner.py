@@ -7,7 +7,12 @@ except ImportError:
     process = None
     print("Warning: rapidfuzz not found. Complaint cleaning will be limited.")
 
-from src.common.config import PipelineConfig, SHEET_KAMUS_KELUHAN, WORKSHEET_TOP_KELUHAN
+from src.common.config import (
+    PipelineConfig, 
+    SHEET_KAMUS_KELUHAN, 
+    WORKSHEET_TOP_KELUHAN,
+    STRICT_COMPLAINT_CLEANING
+)
 from src.common.data_loader import DataLoader
 
 class TextProcessor:
@@ -181,11 +186,19 @@ class ComplaintCleaner:
         df['customer_problems_clean'] = results.apply(lambda x: x[0])
         df['customer_problems_details'] = results.apply(lambda x: x[1])
         
-        # Fill empty clean problems with original? Or keep empty?
-        # Usually for analysis, we want mapped data. The unmapped remains as is in original column.
-        # But if the user wants "cleaner output", maybe we fallback to original if cleaned is empty.
-        mask_empty = df['customer_problems_clean'] == ""
-        df.loc[mask_empty, 'customer_problems_clean'] = df.loc[mask_empty, col_name] # Fallback
         
-        print("✅ Complaint cleaning completed.")
+        # Hybrid Approach: Configurable strict vs lenient mode
+        # - Lenient mode (default): Fallback to original if no match found
+        # - Strict mode: Keep empty string for unmapped complaints (cleaner output)
+        if not STRICT_COMPLAINT_CLEANING:
+            # Lenient mode: Fallback to original text
+            mask_empty = df['customer_problems_clean'] == ""
+            df.loc[mask_empty, 'customer_problems_clean'] = df.loc[mask_empty, col_name]
+            print("✅ Complaint cleaning completed (Lenient mode - fallback enabled).")
+        else:
+            # Strict mode: Keep empty for unmapped data
+            df['customer_problems_clean'] = df['customer_problems_clean'].fillna("")
+            print("✅ Complaint cleaning completed (Strict mode - clean output only).")
+        
         return df
+

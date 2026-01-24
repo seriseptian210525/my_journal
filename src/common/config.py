@@ -104,6 +104,9 @@ WORKSHEET_TOP_KELUHAN = os.getenv("WORKSHEET_TOP_KELUHAN")
 WORKSHEET_TECH_LOG = "cleaning_tech_log" 
 SAVE_LOCAL_CSV = os.getenv("SAVE_LOCAL_CSV", "true").lower() == "true"
 
+# Complaint Cleaning Mode
+STRICT_COMPLAINT_CLEANING = os.getenv("STRICT_COMPLAINT_CLEANING", "false").lower() == "true"
+
 @dataclass
 class PipelineConfig:
     """Configuration for Odometer Cleaning Pipeline"""
