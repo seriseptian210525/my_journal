@@ -216,6 +216,36 @@ class ServiceUtils:
         sid = (ts << 22) | (datacenter_id << 17) | (worker_id << 12) | sequence
         return f"WO-{sid}"
 
+    @staticmethod
+    def format_for_output(series):
+        """
+        Formats datetime series to 'YYYY-MM-DDTHH:MM:SS.mmm+07:00'
+        """
+        if series.empty: return series
+        
+        # Ensure datetime
+        dates = pd.to_datetime(series, errors='coerce')
+        
+        # Format: 2025-09-16T14:27:57.000 (no valid way to do .000 directly easily with strftime on series without slow apply)
+        # Vectorized approach:
+        # ISO string with microseconds: %Y-%m-%dT%H:%M:%S.%f
+        iso_strs = dates.dt.strftime('%Y-%m-%dT%H:%M:%S.%f').fillna('')
+        
+        # Slice to keep only 3 digits of milliseconds and add +07:00
+        # Format gives 2025-09-16T14:27:57.123456
+        # We want first 23 chars (YYYY-MM-DDTHH:MM:SS.mmm) -> then add +07:00
+        
+        def _fmt(val):
+            if not val: return None
+            # Slice first 23 chars (up to 3ms digits)
+            # Check length to be safe
+            if len(val) > 23:
+                return val[:23] + "+07:00"
+            return val + "+07:00" # Fallback if microseconds missing/short? strftime %f always gives 6 or 0? 
+            # If microseconds is 000000, strftime still gives it.
+            
+        return iso_strs.apply(_fmt).replace('', np.nan)
+
 # Legacy support for existing imports (can be removed later if all refs are updated)
 create_historical_snowflake_id = ServiceUtils.create_historical_snowflake_id
 format_plat_nomor = ServiceUtils.format_plat_nomor

@@ -4,7 +4,7 @@ import sys
 import os
 import warnings
 from src.common.data_loader import DataLoader
-from src.pipelines.work_orders.transformers import ServiceDataPipeline, ServiceDataEnricher
+from src.pipelines.work_orders.transformers import ServiceDataPipeline, ServiceDataEnricher, MetadataEnricher
 from src.common.config import (
     SHEET_ID_OUTPUT, WORKSHEET_OUTPUT, WORKSHEET_BAD_OUTPUT,
     SHEET_ID_FORM_SERVICE, WORKSHEET_FORM_SERVICE,
@@ -21,6 +21,7 @@ from src.common.config import (
     WORKSHEET_TECH_LOG,
     SAVE_LOCAL_CSV
 )
+from src.common.utils import ServiceUtils
 from src.pipelines.work_orders.odometer_processor import OdometerProcessor
 from src.pipelines.work_orders.complaint_cleaner import ComplaintCleaner
 
@@ -111,6 +112,9 @@ def run_work_order_pipeline():
         .standardize_location_names()
         .generate_snowflake_ids()
         .randomize_working_hours()
+        .normalize_service_type()
+        .add_convert_customer_type_flag()
+        .add_partner_name_flag()
         .get_results()
     )
     
@@ -132,6 +136,11 @@ def run_work_order_pipeline():
     if 'odometer_clean' in final_df.columns:
         final_df['odometer'] = final_df['odometer_clean'].fillna(final_df['odometer']).astype('int64')
         print(f"   ✅ Replaced odometer with odometer_clean values")
+
+    # [NEW] Generate JSON Metadata Columns (After Odometer is Finalized)
+    print("\n📦 Generating Final Metadata...")
+    meta_enricher = MetadataEnricher(final_df)
+    final_df = meta_enricher.process()
     
     # 7. Export Preparation
     print("\nPreparing Export Dataframes...")
@@ -145,12 +154,30 @@ def run_work_order_pipeline():
     
     business_df = final_df.drop(columns=[c for c in tech_columns if c in final_df.columns], errors='ignore').copy()
     
+    # [UPDATED] Sort by created_at globally before export
+    if 'created_at' in business_df.columns:
+        business_df.sort_values(by='created_at', ascending=True, inplace=True)
+    
     key_cols = ['order_id', 'created_at', 'vehicle_vin', 'vehicle_license_plate']
     tech_cols_to_use = [c for c in tech_columns if c in final_df.columns]
     tech_df = final_df[key_cols + tech_cols_to_use].copy()
+
+    # [UPDATED] Sort tech log too
+    if 'created_at' in tech_df.columns:
+        tech_df.sort_values(by='created_at', ascending=True, inplace=True)
     
     if 'customer_problems_details' in tech_df.columns:
         tech_df['customer_problems_details'] = tech_df['customer_problems_details'].astype(str)
+
+    # [UPDATED] Format Dates for Output (ISO 8601 with Timezone)
+    date_cols_to_format = ['created_at', 'updated_at', 'completed_at', 'prize_finalized_at']
+    
+    print("   Note: Formatting date columns to ISO 8601...")
+    for col in date_cols_to_format:
+        if col in business_df.columns:
+            business_df[col] = ServiceUtils.format_for_output(business_df[col])
+        if col in tech_df.columns:
+            tech_df[col] = ServiceUtils.format_for_output(tech_df[col])
 
     print("\n💾 Exporting Results...")
     

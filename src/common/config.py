@@ -59,7 +59,13 @@ DRIVER_CATEGORY_RULES = _wo_config.get('driver_category_rules', {})
 env_path = BASE_DIR / ".env"
 load_dotenv(dotenv_path=env_path)
 
-# Credentials
+# Service Items Pipeline
+SHEET_ID_MAPPINGS = os.getenv('SHEET_ID_MAPPINGS', '')
+WORKSHEET_MAPPINGS = os.getenv('WORKSHEET_MAPPINGS', 'Mappings')
+SHEET_ID_SERVICE_ITEMS = os.getenv('SHEET_ID_SERVICE_ITEMS', '')
+WORKSHEET_SERVICE_ITEMS = os.getenv('WORKSHEET_SERVICE_ITEMS', 'service_items')
+
+# --- Credentials (REQUIRED) ---
 SERVICE_ACCOUNT_FILE = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 
 # Auto-discovery fallback for Credentials

@@ -470,47 +470,191 @@ class ServiceDataEnricher:
         print("🚀 Standardizing Mechanics...")
         if employee_df is None or employee_df.empty: return self
         
+        # [UPDATED] Pattern Map: Regex -> (Name lower, id)
         patterns = []
         for _, row in employee_df.iterrows():
             if pd.notna(row['Pola Regex']) and str(row['Pola Regex']).strip() != '':
-                try: patterns.append((re.compile(r'\b' + str(row['Pola Regex']) + r'\b', re.IGNORECASE), row['Full Name']))
+                try: 
+                    # Simpan tuple (Name Clean, ID)
+                    patterns.append((
+                        re.compile(r'\b' + str(row['Pola Regex']) + r'\b', re.IGNORECASE), 
+                        row['Name lower'], 
+                        row['id']
+                    ))
                 except: continue
 
-        def _match(name, stype):
-            name = str(name).strip()
-            if stype == 'Official Partner Service': return "Mechanic Workshop Partner"
-            if len(name) < 3 or name.lower() in ['nan', 'none', '']: return "Daily Worker"
-            for p, full in patterns:
-                if p.search(name): return full
-            return "Daily Worker"
+        # [UPDATED] Fallback Constants
+        FALLBACK_NAME = "service advisor pi"
+        FALLBACK_ID = "e198bfcc-219a-49bf-908b-0b765ba01bf7"
+        PARTNER_NAME = "Mechanic Workshop Partner"
 
-        self.df['completed_by'] = self.df.apply(lambda x: _match(x['completed_by'], x['service_type']), axis=1)
+        def _match_mechanic(name, stype):
+            """Returns tuple (mechanic_name, operator_id)"""
+            name = str(name).strip()
+            
+            # 1. Partner Service
+            if stype == 'Official Partner Service': 
+                return PARTNER_NAME, FALLBACK_ID
+            
+            # 2. Invalid Input -> Fallback
+            if len(name) < 3 or name.lower() in ['nan', 'none', '']: 
+                return FALLBACK_NAME, FALLBACK_ID
+            
+            # 3. Regex Match
+            for p, name_clean, op_id in patterns:
+                if p.search(name): 
+                    return name_clean, op_id
+            
+            # 4. No Match -> Fallback
+            return FALLBACK_NAME, FALLBACK_ID
+
+        # Apply logic and expand results to two columns
+        results = self.df.apply(lambda x: _match_mechanic(x['completed_by'], x['service_type']), axis=1)
+        
+        self.df['completed_by'] = results.apply(lambda x: x[0])
+        self.df['operator_id'] = results.apply(lambda x: x[1])
+        
         return self
 
     def standardize_location_names(self):
-        """Standardize service_location_name"""
-        print("🚀 Standardizing Location Names...")
+        """Standardize service_location_name and map to service_location_id"""
+        print("🚀 Standardizing Location Names & Mapping IDs...")
         
-        def _standardize_location(loc):
-            if pd.isna(loc): return loc
-            loc_str = str(loc).strip()
+        # [UPDATED] UUID Mapping
+        LOCATION_MAP = {
+            "Pondok Indah": "657d2142-f5d1-436d-8eb4-1f2569c84816",
+            "Kembangan": "db98ae78-f9f6-4c58-968d-83613fb9fde9",
+            "Depok": "231d1bba-1768-4b07-acf9-0dc5c59ff6bb",
+            "Bekasi": "2e6de234-b935-4f01-99fa-07f932846617",
+            "Grab-Cakung": "68c61879-7a70-46f6-8748-f3f2f6800ba4" 
+        }
+
+        def _resolve_location(row):
+            """Returns tuple (normalized_name, location_id)"""
+            loc = row.get('service_location_name')
+            stype = row.get('service_type')
+
+            # 1. Handle Official Partner Service -> ID is Null
+            if str(stype) == 'Official Partner Service':
+                return loc, None
+
+            if pd.isna(loc): return loc, None
             
+            loc_str = str(loc).strip()
+            norm_name = loc_str # Default
+
+            # 2. Keywords Normalization
             # Check for Grab Cakung
             if any(keyword in loc_str for keyword in ['Grab', 'Cakung', 'grab', 'cakung']):
-                return "Grab Cakung"
+                norm_name = "Grab-Cakung"
             
             # Check for Pondok Indah
-            if any(keyword in loc_str for keyword in ['Electrum', 'Pondok Indah', 'electrum', 'pondok indah']):
-                return "Pondok Indah"
+            elif any(keyword in loc_str for keyword in ['Electrum', 'Pondok Indah', 'electrum', 'pondok indah']):
+                norm_name = "Pondok Indah"
             
-            return loc_str
+            elif "Kembangan" in loc_str: norm_name = "Kembangan"
+            elif "Depok" in loc_str: norm_name = "Depok"
+            elif "Bekasi" in loc_str: norm_name = "Bekasi"
+            
+            # 3. Lookup ID
+            loc_id = LOCATION_MAP.get(norm_name, None)
+            
+            return norm_name, loc_id
         
+        # Apply Logic
+        if 'service_location_name' in self.df.columns:
+            # We need row-wise access for service_type check
+            results = self.df.apply(_resolve_location, axis=1)
+            
+            self.df['service_location_name'] = results.apply(lambda x: x[0])
+            self.df['service_location_id'] = results.apply(lambda x: x[1])
+        else:
+             self.df['service_location_id'] = None
+        
+        return self
+
         if 'service_location_name' in self.df.columns:
             self.df['service_location_name'] = self.df['service_location_name'].apply(_standardize_location)
         
         return self
 
+    def normalize_service_type(self):
+        """
+        Convert service_type to snake_case (lowercase + underscores instead of spaces).
+        Handles commas and potential special chars.
+        """
+        print("🚀 Normalizing Service Type (snake_case)...")
+        if 'service_type' in self.df.columns:
+            self.df['service_type'] = (
+                self.df['service_type']
+                .astype(str)
+                .str.lower()
+                .str.strip()
+                # 1. Replace commas, slashes, dashes with space first to assume they are separators
+                .str.replace(r'[,\/\-]', ' ', regex=True)
+                # 2. Keep only alphanumeric and spaces (remove other special chars)
+                .str.replace(r'[^a-zA-Z0-9\s]', '', regex=True)
+                # 3. Collapse multiple spaces into single underscore
+                .str.replace(r'\s+', '_', regex=True)
+                .str.strip('_') # Remove leading/trailing underscores
+            )
+        return self
+
+        return self
+
+    def add_convert_customer_type_flag(self):
+        """
+        Add flag 'convert_customer_type':
+        IF customer_type == 'EKB' -> 'ELECTRUM_USER'
+        ELSE -> 'PARTNER_USER'
+        """
+        print("🚀 Adding Convert Customer Type Flag...")
+        if 'customer_type' not in self.df.columns:
+            self.df['customer_type'] = np.nan
+        
+        # Case insensitive check for 'EKB'
+        # Logic: If 'EKB' is in the string or Equals 'EKB'? 
+        # User said: IF('customer_type'="EKB", ...) implying exact match.
+        # But data might be dirty. Let's assume contain or exact match after trim.
+        # Let's go strict exact match or safe upper check as requested: "EKB"
+        
+        def _get_flag(val):
+            val_str = str(val).strip().upper()
+            if val_str == "EKB":
+                return "ELECTRUM_USER"
+            return "PARTNER_USER"
+            
+        self.df['convert_customer_type'] = self.df['customer_type'].apply(_get_flag)
+        return self
+
+    def add_partner_name_flag(self):
+        """
+        Add flag 'partner_name':
+        IF customer_type == 'EKB' -> NULL
+        IF customer_type == 'GEL' -> 'GRAB'
+        ELSE -> customer_type
+        """
+        print("🚀 Adding Partner Name Flag...")
+        if 'customer_type' not in self.df.columns:
+            self.df['partner_name'] = np.nan
+            return self
+
+        def _get_partner(val):
+            if pd.isna(val): return None
+            val_str = str(val).strip()
+            val_upper = val_str.upper()
+            
+            if val_upper == "EKB":
+                return None
+            if val_upper == "GEL":
+                return "GRAB"
+            return val_str # Default: return original value (cleaned)
+            
+        self.df['partner_name'] = self.df['customer_type'].apply(_get_partner)
+        return self
+
     def generate_snowflake_ids(self):
+
         print("🚀 Generating IDs (Deterministic)...")
         # Ensure created_at is datetime
         self.df['created_at'] = pd.to_datetime(self.df['created_at'])
@@ -1075,3 +1219,96 @@ class ServiceDataEnricher:
 
     def get_results(self):
         return self.df, self.bad_data
+
+
+class MetadataEnricher:
+    """
+    Handles generation of JSON metadata columns for final output.
+    """
+    def __init__(self, df):
+        self.df = df
+
+    def _to_json_safe(self, data):
+        import json
+        try:
+            return json.dumps(data)
+        except:
+            return None
+
+    def process(self):
+        print("🚀 Generating Final JSON Metadata Columns...")
+        import json
+
+        # Helper for partner_name null handling
+        def get_partner_name(row):
+            val = row.get('partner_name')
+            if pd.isna(val) or str(val).lower() in ['nan', 'none', '', 'null']:
+                return None
+            return str(val)
+
+        # 1. asset_metadata
+        # {"partner_id": null, "partner_name": "VALUE", "vehicle_owner_id": null, "vehicle_owner_name": null}
+        def gen_asset_metadata(row):
+            p_name = get_partner_name(row)
+            data = {
+                "partner_id": None,
+                "partner_name": p_name,
+                "vehicle_owner_id": None,
+                "vehicle_owner_name": None
+            }
+            return json.dumps(data)
+        
+        self.df['asset_metadata'] = self.df.apply(gen_asset_metadata, axis=1)
+
+        # 2. asset_telemetry
+        # {"batteries": [], "vehicle": {"odometer": VALUE}}
+        def gen_asset_telemetry(row):
+            odo = row.get('odometer', 0)
+            try: odo = int(float(odo))
+            except: odo = 0
+            
+            data = {
+                "batteries": [],
+                "vehicle": {"odometer": odo}
+            }
+            return json.dumps(data)
+            
+        self.df['asset_telemetry'] = self.df.apply(gen_asset_telemetry, axis=1)
+
+        # 3. customer_metadata
+        # {"customer_type": null, "partner_id": null, "partner_name": "VALUE", "user_type": "VALUE"}
+        def gen_customer_metadata(row):
+            p_name = get_partner_name(row)
+            # [UPDATED] user_type from convert_customer_type
+            user_type = row.get('convert_customer_type')
+            if pd.isna(user_type): user_type = None
+            
+            data = {
+                "customer_type": None,
+                "partner_id": None,
+                "partner_name": p_name,
+                "user_type": user_type
+            }
+            return json.dumps(data)
+            
+        self.df['customer_metadata'] = self.df.apply(gen_customer_metadata, axis=1)
+
+        # 4. customer_problems_parsed (List conversion)
+        def gen_customer_problems_list(row):
+            val = row.get('customer_problems')
+            if pd.isna(val) or str(val).strip() == "":
+                return "[]" # Empty list as JSON string
+            
+            # Use TextProcessor if available or simple split
+            txt = str(val).lower()
+            # Clean
+            txt = re.sub(r'[^a-z0-9,\s]', '', txt)
+            # Split by comma
+            items = [x.strip() for x in txt.split(',') if x.strip()]
+            
+            return json.dumps(items)
+
+        # [UPDATED] New column for list, safe original customer_problems
+        self.df['customer_problems_parsed'] = self.df.apply(gen_customer_problems_list, axis=1)
+
+        return self.df

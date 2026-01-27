@@ -27,6 +27,10 @@ service_type_mapping:
   'Swap In (Tukar Unit)': 'Urgent'
   'Driver Coming (Trouble), Mechanic Visit (CS)': 'Urgent'
   'Resign / Offboarding': 'Walk-In Maintenance'
+  'Driver Coming (Trouble), Mechanic Visit (CS), Campaign (Big Issue)': 'Urgent'
+  'Mechanic Visit (CS), Driver Coming Trouble (CS)': 'Urgent'
+  'Interval Service, Driver Coming (Trouble), Mechanic Visit (CS)': 'Urgent'
+  'Mechanic Visit (CS), Campaign (Big Issue)': 'Storing'
 
 parts_columns_mapping:
   'S1_FORM_SERVICE':
