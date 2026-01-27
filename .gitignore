@@ -1,5 +1,6 @@
 # Environment Variables & Secrets
 .env
+.env.example
 env.yaml
 credentials/
 
