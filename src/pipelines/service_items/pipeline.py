@@ -21,6 +21,7 @@ class ServiceItemsPipeline:
         self.mapping_df = mapping_df
         self.bike_df = bike_df
         self.df = None
+        self.ignored_fuzzy_df = None  # Items that failed fuzzy matching
 
         # Prepare Mapping Data
         # Filter rows where regex is present
@@ -190,6 +191,7 @@ class ServiceItemsPipeline:
     def process_fuzzy_matching(self):
         """
         Step 3: Fuzzy Matching, Ignore Part Filtering, and Deduplication.
+        Tracks items that couldn't be matched or were marked as 'Ignore Part'.
         """
         print(">>> [Step 3] Running Fuzzy Matching...")
 
@@ -200,12 +202,28 @@ class ServiceItemsPipeline:
             lambda x: self._smart_fuzzy_match(x, target_parts, threshold=85)
         )
 
+        # --- TRACK IGNORED PARTS ---
+        # 1. Items with no fuzzy match (NaN)
+        no_match_mask = self.df['Rekomendasi Nama Part Baru'].isna()
+        no_match_df = self.df[no_match_mask].copy()
+        no_match_df['ignore_reason'] = 'No Fuzzy Match Found'
+        print(f"   Found {len(no_match_df)} rows with no fuzzy match.")
+        
+        # 2. Items with 'Ignore Part' value
+        ignore_part_mask = self.df['Rekomendasi Nama Part Baru'].astype(str).str.lower() == 'ignore part'
+        ignore_part_df = self.df[ignore_part_mask].copy()
+        ignore_part_df['ignore_reason'] = 'Marked as Ignore Part'
+        print(f"   Found {len(ignore_part_df)} rows marked as 'Ignore Part'.")
+        
+        # Combine ignored parts
+        self.ignored_fuzzy_df = pd.concat([no_match_df, ignore_part_df], ignore_index=True)
+        print(f"   Total ignored fuzzy items: {len(self.ignored_fuzzy_df)}")
+
         # --- CLEANING ---
         # 1. Drop NaN results (No match found > threshold)
         self.df = self.df.dropna(subset=['Rekomendasi Nama Part Baru'])
 
         # 2. Drop 'Ignore Part'
-        print(">>> Filtering 'Ignore Part'...")
         before_ignore = len(self.df)
         self.df = self.df[self.df['Rekomendasi Nama Part Baru'].astype(str).str.lower() != 'ignore part']
         print(f"   Dropped {before_ignore - len(self.df)} rows (Ignore Part).")
@@ -218,6 +236,7 @@ class ServiceItemsPipeline:
         before_dedup = len(self.df)
         self.df = self.df.drop_duplicates(subset=existing_subset)
         print(f"   Dropped {before_dedup - len(self.df)} rows (Duplicates within same Service Order).")
+
 
         print(f"✅ Fuzzy & Cleaning Complete. Total Valid Rows: {len(self.df)}")
         return self.df
@@ -487,45 +506,26 @@ class ServiceItemsPipeline:
 
     def get_ignored_parts(self):
         """
-        Get parts that couldn't be properly formatted (missing Product Name or ERP Product ID).
-        These are parts that didn't match any mapping or have incomplete data.
+        Get parts that failed fuzzy matching (no match or 'Ignore Part').
+        Returns original item_name from Work Orders for debugging.
         """
-        if self.df is None:
-            raise ValueError("Pipeline has not been run. Call run() first.")
-        
-        # Define criteria for ignored parts
-        # 1. Missing Product Name or Rekomendasi Nama Part Baru
-        # 2. Missing ERP Product ID
-        # 3. item_name still equals mapped_item_name (no regex match found)
-        
-        df = self.df.copy()
-        
-        # Condition: No mapping found (Product Name is empty/null)
-        cond_no_product = df['Product Name'].isna() | (df['Product Name'].astype(str).str.strip() == '')
-        
-        # Condition: No ERP Product ID
-        cond_no_erp = df['ERP Product ID'].isna() | (df['ERP Product ID'].astype(str).str.strip() == '') | (df['ERP Product ID'].astype(str) == '0')
-        
-        # Combine conditions
-        ignored_mask = cond_no_product | cond_no_erp
-        
-        ignored_df = df[ignored_mask].copy()
-        
-        if len(ignored_df) == 0:
-            print("✅ No ignored parts found.")
+        if self.ignored_fuzzy_df is None or self.ignored_fuzzy_df.empty:
+            print("✅ No ignored fuzzy parts found.")
             return pd.DataFrame()
         
-        # Select relevant columns for debugging
+        ignored_df = self.ignored_fuzzy_df.copy()
+        
+        # Select relevant columns for debugging (include original item_name)
         debug_columns = [
             'order_id', 'vehicle_license_plate', 'item_name', 'mapped_item_name',
-            'Rekomendasi Nama Part Baru', 'Product Name', 'ERP Product ID',
+            'Rekomendasi Nama Part Baru', 'ignore_reason',
             'created_at', 'service_location_name', 'bike_type'
         ]
         
         available_cols = [c for c in debug_columns if c in ignored_df.columns]
         ignored_df = ignored_df[available_cols]
         
-        print(f"⚠️ Found {len(ignored_df)} ignored parts (missing Product Name or ERP ID).")
+        print(f"⚠️ Found {len(ignored_df)} ignored parts (failed fuzzy matching).")
         return ignored_df
 
     def run(self):

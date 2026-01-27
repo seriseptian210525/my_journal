@@ -9,11 +9,9 @@ from src.common.config import (
     SHEET_ID_OUTPUT, WORKSHEET_OUTPUT,
     SHEET_ID_MAPPINGS, WORKSHEET_MAPPINGS,
     SHEET_ID_ASSET_LIST, WORKSHEET_ASSET,
-    SHEET_ID_SERVICE_ITEMS, WORKSHEET_SERVICE_ITEMS
+    SHEET_ID_SERVICE_ITEMS, WORKSHEET_SERVICE_ITEMS,
+    WORKSHEET_IGNORE_PART
 )
-
-# Worksheet name for ignored parts
-WORKSHEET_IGNORE_PART = "ignore_part"
 
 def run_service_items_pipeline():
     print("🚀 Starting Service Items Pipeline (Pipeline 2)...")
