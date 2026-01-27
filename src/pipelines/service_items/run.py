@@ -12,6 +12,9 @@ from src.common.config import (
     SHEET_ID_SERVICE_ITEMS, WORKSHEET_SERVICE_ITEMS
 )
 
+# Worksheet name for ignored parts
+WORKSHEET_IGNORE_PART = "ignore_part"
+
 def run_service_items_pipeline():
     print("🚀 Starting Service Items Pipeline (Pipeline 2)...")
     
@@ -52,9 +55,9 @@ def run_service_items_pipeline():
     # 3. Initialize Pipeline
     pipeline = ServiceItemsPipeline(work_orders_df, mapping_df, bike_df)
     
-    # 4. Run Pipeline (returns both full data and formatted output)
+    # 4. Run Pipeline (returns full data, formatted output, and ignored parts)
     print("\n⚙️ Running Pipeline Logic...")
-    full_df, formatted_df = pipeline.run_with_output()
+    full_df, formatted_df, ignored_df = pipeline.run_with_output()
 
     # 5. Export Results
     print("\n💾 Exporting Results...")
@@ -71,13 +74,26 @@ def run_service_items_pipeline():
     formatted_df.to_csv(local_path_formatted, index=False)
     print(f"✅ Formatted data saved to {local_path_formatted} ({len(formatted_df)} rows)")
 
+    # Save ignored parts locally
+    if not ignored_df.empty:
+        local_path_ignored = os.path.join(output_dir, 'service_items_ignored.csv')
+        ignored_df.to_csv(local_path_ignored, index=False)
+        print(f"⚠️ Ignored parts saved to {local_path_ignored} ({len(ignored_df)} rows)")
+
     # Upload FORMATTED output to Google Sheets
-    print(f"\n☁️ Uploading to Google Sheets ({WORKSHEET_SERVICE_ITEMS})...")
+    print(f"\n☁️ Uploading to Google Sheets...")
     
     target_sheet_id = SHEET_ID_SERVICE_ITEMS
     
     if target_sheet_id and WORKSHEET_SERVICE_ITEMS:
+        # Upload formatted output to main sheet
+        print(f"   Uploading formatted data to {WORKSHEET_SERVICE_ITEMS}...")
         loader.upload_to_sheet(formatted_df, target_sheet_id, WORKSHEET_SERVICE_ITEMS)
+        
+        # Upload ignored parts to ignore_part sheet
+        if not ignored_df.empty:
+            print(f"   Uploading ignored parts to {WORKSHEET_IGNORE_PART}...")
+            loader.upload_to_sheet(ignored_df, target_sheet_id, WORKSHEET_IGNORE_PART)
     else:
         print("⚠️ Skipping Upload: SHEET_ID_SERVICE_ITEMS or WORKSHEET_SERVICE_ITEMS not configured.")
 

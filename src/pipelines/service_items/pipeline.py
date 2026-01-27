@@ -434,7 +434,8 @@ class ServiceItemsPipeline:
             'vehicle_engine': 'Vehicle Engine',
             'Product Name': 'Item Name',
             'New SKU': 'Sku',
-            'ERP Product ID': 'Erp Product ID'
+            'ERP Product ID': 'Erp Product ID',
+            'Pergantian Ke': 'Pergantian Ke'
         }
         
         # Apply renaming for existing columns
@@ -442,7 +443,7 @@ class ServiceItemsPipeline:
             if old_col in output_df.columns:
                 output_df = output_df.rename(columns={old_col: new_col})
         
-        # Define final output column order
+        # Define final output column order (extended with new columns)
         final_columns = [
             'Order Number',
             'Vehicle License Plate',
@@ -457,7 +458,18 @@ class ServiceItemsPipeline:
             'Warranty',
             'Status',
             'Sku',
-            'Erp Product ID'
+            'Erp Product ID',
+            # New columns
+            'created_at',
+            'updated_at',
+            'completed_at',
+            'prize_finalized_at',
+            'odometer',
+            'service_location_name',
+            'bike_type',
+            'service_type',
+            'completed_by',
+            'Pergantian Ke'
         ]
         
         # Select only columns that exist
@@ -473,6 +485,49 @@ class ServiceItemsPipeline:
         print(f"✅ Output Formatted. Total Rows: {len(output_df)}")
         return output_df
 
+    def get_ignored_parts(self):
+        """
+        Get parts that couldn't be properly formatted (missing Product Name or ERP Product ID).
+        These are parts that didn't match any mapping or have incomplete data.
+        """
+        if self.df is None:
+            raise ValueError("Pipeline has not been run. Call run() first.")
+        
+        # Define criteria for ignored parts
+        # 1. Missing Product Name or Rekomendasi Nama Part Baru
+        # 2. Missing ERP Product ID
+        # 3. item_name still equals mapped_item_name (no regex match found)
+        
+        df = self.df.copy()
+        
+        # Condition: No mapping found (Product Name is empty/null)
+        cond_no_product = df['Product Name'].isna() | (df['Product Name'].astype(str).str.strip() == '')
+        
+        # Condition: No ERP Product ID
+        cond_no_erp = df['ERP Product ID'].isna() | (df['ERP Product ID'].astype(str).str.strip() == '') | (df['ERP Product ID'].astype(str) == '0')
+        
+        # Combine conditions
+        ignored_mask = cond_no_product | cond_no_erp
+        
+        ignored_df = df[ignored_mask].copy()
+        
+        if len(ignored_df) == 0:
+            print("✅ No ignored parts found.")
+            return pd.DataFrame()
+        
+        # Select relevant columns for debugging
+        debug_columns = [
+            'order_id', 'vehicle_license_plate', 'item_name', 'mapped_item_name',
+            'Rekomendasi Nama Part Baru', 'Product Name', 'ERP Product ID',
+            'created_at', 'service_location_name', 'bike_type'
+        ]
+        
+        available_cols = [c for c in debug_columns if c in ignored_df.columns]
+        ignored_df = ignored_df[available_cols]
+        
+        print(f"⚠️ Found {len(ignored_df)} ignored parts (missing Product Name or ERP ID).")
+        return ignored_df
+
     def run(self):
         """
         Executes the full pipeline sequence.
@@ -486,10 +541,12 @@ class ServiceItemsPipeline:
 
     def run_with_output(self):
         """
-        Executes the full pipeline and returns both:
+        Executes the full pipeline and returns:
         - Full enriched DataFrame
         - Formatted output DataFrame for Google Sheets
+        - Ignored parts DataFrame (for debugging)
         """
         self.run()
         formatted_output = self.format_output()
-        return self.df, formatted_output
+        ignored_parts = self.get_ignored_parts()
+        return self.df, formatted_output, ignored_parts
