@@ -52,27 +52,32 @@ def run_service_items_pipeline():
     # 3. Initialize Pipeline
     pipeline = ServiceItemsPipeline(work_orders_df, mapping_df, bike_df)
     
-    # 4. Run Pipeline
+    # 4. Run Pipeline (returns both full data and formatted output)
     print("\n⚙️ Running Pipeline Logic...")
-    result_df = pipeline.run()
+    full_df, formatted_df = pipeline.run_with_output()
 
     # 5. Export Results
     print("\n💾 Exporting Results...")
 
-    # Export to CSV locally
+    # Export full data to local CSV (for debugging/archival)
     output_dir = os.path.join(os.getcwd(), 'output')
     os.makedirs(output_dir, exist_ok=True)
-    local_path = os.path.join(output_dir, 'service_items_processed.csv')
-    result_df.to_csv(local_path, index=False)
-    print(f"✅ Local CSV saved to {local_path} ({len(result_df)} rows)")
+    
+    local_path_full = os.path.join(output_dir, 'service_items_full.csv')
+    full_df.to_csv(local_path_full, index=False)
+    print(f"✅ Full data saved to {local_path_full} ({len(full_df)} rows)")
+    
+    local_path_formatted = os.path.join(output_dir, 'service_items_formatted.csv')
+    formatted_df.to_csv(local_path_formatted, index=False)
+    print(f"✅ Formatted data saved to {local_path_formatted} ({len(formatted_df)} rows)")
 
-    # Upload to Google Sheets
+    # Upload FORMATTED output to Google Sheets
     print(f"\n☁️ Uploading to Google Sheets ({WORKSHEET_SERVICE_ITEMS})...")
     
     target_sheet_id = SHEET_ID_SERVICE_ITEMS
     
     if target_sheet_id and WORKSHEET_SERVICE_ITEMS:
-        loader.upload_to_sheet(result_df, target_sheet_id, WORKSHEET_SERVICE_ITEMS)
+        loader.upload_to_sheet(formatted_df, target_sheet_id, WORKSHEET_SERVICE_ITEMS)
     else:
         print("⚠️ Skipping Upload: SHEET_ID_SERVICE_ITEMS or WORKSHEET_SERVICE_ITEMS not configured.")
 

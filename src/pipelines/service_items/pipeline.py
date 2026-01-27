@@ -363,12 +363,133 @@ class ServiceItemsPipeline:
         print("✅ Data Enrichment Complete.")
         return self.df
 
+    def format_output(self):
+        """
+        Format output DataFrame for Google Sheets with specific column structure.
+        
+        Output Columns:
+        - Order Number, Vehicle License Plate, Vehicle Vin, Vehicle Engine
+        - Item Type (SPAREPART), Item Name, Base Price, Final Price
+        - Qty, Subtotal Price, Warranty, Status (APPLIED), Sku, Erp Product ID
+        """
+        print(">>> [Step 5] Formatting Output for Google Sheets...")
+        
+        if self.df is None:
+            raise ValueError("Pipeline has not been run. Call run() first.")
+        
+        # ERP Product IDs with default Qty = 2
+        DEFAULT_QTY_2_ERP_IDS = [1735, 1742, 1736, 1762]
+        
+        # Create a copy to avoid modifying original
+        output_df = self.df.copy()
+        
+        # Ensure ERP Product ID is numeric for comparison
+        if 'ERP Product ID' in output_df.columns:
+            output_df['ERP Product ID'] = pd.to_numeric(output_df['ERP Product ID'], errors='coerce').fillna(0).astype(int)
+        
+        # Calculate Qty
+        # Step 1: Count occurrences of same Product Name within same Order Number
+        if 'order_id' in output_df.columns and 'Product Name' in output_df.columns:
+            output_df['_count'] = output_df.groupby(['order_id', 'Product Name'])['Product Name'].transform('count')
+        else:
+            output_df['_count'] = 1
+        
+        # Step 2: Apply default Qty=2 for specific ERP Product IDs, otherwise use count
+        if 'ERP Product ID' in output_df.columns:
+            output_df['Qty'] = np.where(
+                output_df['ERP Product ID'].isin(DEFAULT_QTY_2_ERP_IDS),
+                2,
+                output_df['_count']
+            )
+        else:
+            output_df['Qty'] = output_df['_count']
+        
+        output_df = output_df.drop(columns=['_count'])
+        
+        # Deduplicate rows with same order_id + Product Name (keep first, Qty already calculated)
+        if 'order_id' in output_df.columns and 'Product Name' in output_df.columns:
+            output_df = output_df.drop_duplicates(subset=['order_id', 'Product Name'], keep='first')
+        
+        # Ensure Base Price is numeric
+        if 'Base Price' in output_df.columns:
+            output_df['Base Price'] = pd.to_numeric(output_df['Base Price'], errors='coerce').fillna(0)
+        else:
+            output_df['Base Price'] = 0
+        
+        # Calculate Final Price (= Base Price, since we're not calculating INTERNAL_COVER)
+        output_df['Final Price'] = output_df['Base Price']
+        
+        # Calculate Subtotal Price (Base Price * Qty)
+        output_df['Subtotal Price'] = output_df['Base Price'] * output_df['Qty']
+        
+        # Add static columns
+        output_df['Item Type'] = 'SPAREPART'
+        output_df['Status'] = 'APPLIED'
+        
+        # Rename columns for output
+        column_mapping = {
+            'order_id': 'Order Number',
+            'vehicle_license_plate': 'Vehicle License Plate',
+            'vehicle_vin': 'Vehicle Vin',
+            'vehicle_engine': 'Vehicle Engine',
+            'Product Name': 'Item Name',
+            'New SKU': 'Sku',
+            'ERP Product ID': 'Erp Product ID'
+        }
+        
+        # Apply renaming for existing columns
+        for old_col, new_col in column_mapping.items():
+            if old_col in output_df.columns:
+                output_df = output_df.rename(columns={old_col: new_col})
+        
+        # Define final output column order
+        final_columns = [
+            'Order Number',
+            'Vehicle License Plate',
+            'Vehicle Vin',
+            'Vehicle Engine',
+            'Item Type',
+            'Item Name',
+            'Base Price',
+            'Final Price',
+            'Qty',
+            'Subtotal Price',
+            'Warranty',
+            'Status',
+            'Sku',
+            'Erp Product ID'
+        ]
+        
+        # Select only columns that exist
+        available_columns = [col for col in final_columns if col in output_df.columns]
+        
+        # Add missing columns with empty values
+        for col in final_columns:
+            if col not in output_df.columns:
+                output_df[col] = ''
+        
+        output_df = output_df[final_columns]
+        
+        print(f"✅ Output Formatted. Total Rows: {len(output_df)}")
+        return output_df
+
     def run(self):
         """
         Executes the full pipeline sequence.
+        Returns the enriched DataFrame (full data).
         """
         self.process_transpose()
         self.process_regex_mapping()
         self.process_fuzzy_matching()
         self.enrich_data()
         return self.df
+
+    def run_with_output(self):
+        """
+        Executes the full pipeline and returns both:
+        - Full enriched DataFrame
+        - Formatted output DataFrame for Google Sheets
+        """
+        self.run()
+        formatted_output = self.format_output()
+        return self.df, formatted_output
