@@ -98,7 +98,8 @@ my_journal/
 ### 1. Clone Repository
 
 ```bash
-cd C:\Users\lenov\OneDrive\Documents\my_journal
+git clone https://github.com/seriseptian210525/my_journal.git
+cd my_journal
 ```
 
 ### 2. Buat Virtual Environment
@@ -145,13 +146,13 @@ pip install -r requirements.txt
 
 2. Edit `.env` dan isi dengan nilai yang sesuai:
    ```env
-   # Credentials
-   GOOGLE_APPLICATION_CREDENTIALS=./credentials/seri-automation-etl.json
+   # Credentials (path to your service account JSON)
+   GOOGLE_APPLICATION_CREDENTIALS=./credentials/your-service-account.json
    
    # Google Sheets IDs (replace with your actual IDs)
-   SHEET_ID_FORM_SERVICE=1uyHApnw...
-   SHEET_ID_OUTPUT=1DiCivMEo...
-   # ... dan seterusnya
+   SHEET_ID_FORM_SERVICE=your_sheet_id_here
+   SHEET_ID_OUTPUT=your_output_sheet_id_here
+   # ... dan seterusnya (lihat .env.example untuk template lengkap)
    ```
 
 ### 3. Share Google Sheets
@@ -269,7 +270,7 @@ pytest --cov=src tests/
 **Solusi:**
 ```bash
 # Make sure you're in project root
-cd C:\Users\lenov\OneDrive\Documents\my_journal
+cd /path/to/my_journal
 
 # Run with python -m (module mode)
 python -m src.pipelines.work_orders.run
