@@ -1,0 +1,47 @@
+# Warranty Rules Configuration
+# This file defines the rules for determining warranty coverage for service items.
+
+warranty:
+  # Category values for the 'Warranty' column
+  categories:
+    - PACKAGE_SERVICE  # Priority 1: Parts covered under service package
+    - WARRANT          # Priority 2: Within warranty period
+    - INSURANCE        # Priority 3: Body parts covered by insurance
+    - NOT_COVERED      # Priority 4: Customer pays (default)
+
+  # PACKAGE_SERVICE Rules (Priority 1)
+  package_service:
+    # Rules for ELECTRUM_USER
+    electrum_user:
+      - part_names: ["Rear Brake Pad", "Front Brake Pad"]
+        max_replacements: 6  # Covered up to 6th replacement
+        yearly_reset: false   # No reset for Electrum
+
+    # Rules for PARTNER_USER
+    partner_user:
+      - part_names: ["Rear Tire KENDA", "Front Tire KENDA"]
+        max_replacements: 2  # Covered up to 2nd replacement per year
+        yearly_reset: true   # Resets every 12 months
+
+      - part_names: ["Rear Brake Pad", "Front Brake Pad"]
+        max_replacements: 6  # Covered up to 6th replacement per year
+        yearly_reset: true   # Resets every 12 months
+
+  # WARRANT Rules (Priority 2)
+  # Uses 'Periode Garansi' from mapping sheet
+  # If 'Bulan Ke' < 'Periode Garansi', warranty applies
+
+  # INSURANCE Rules (Priority 3)
+  # Parts related to body, frame, plate number cover, or mirrors
+  insurance_parts:
+    - "Body Cover"
+    - "Front Fender"
+    - "Rear Fender"
+    - "Side Cover"
+    - "Rear Mirror"
+    - "Plate Number Cover"
+    - "Frame"
+    # Add more as needed
+
+  # NOT_COVERED (Priority 4)
+  # Default for all other cases

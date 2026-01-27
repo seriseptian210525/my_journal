@@ -260,61 +260,98 @@ class ServiceItemsPipeline:
         if 'created_at' in self.df.columns:
             self.df = self.df.sort_values('created_at')
         
-        # Group by Plate + Part Name -> Cumulative Count
+        # Group by Plate + Part Name -> Cumulative Count (Global)
         self.df['Pergantian Ke'] = self.df.groupby(['vehicle_license_plate', 'Rekomendasi Nama Part Baru']).cumcount() + 1
 
-        # 5. Coverage Logic (Categorical Warranty)
+        # 5. Warranty Logic (Categorical, Priority-based)
+        print("   Calculating Warranty status...")
+        
         p_name = self.df['Rekomendasi Nama Part Baru']
-        p_count = self.df.get('Pergantian Ke', 0)
+        p_count = self.df['Pergantian Ke']
         
         if 'Periode Garansi' in self.df.columns:
              self.df['Periode Garansi'] = pd.to_numeric(self.df['Periode Garansi'], errors='coerce').fillna(0).astype(int)
         
-        # Logic Table
-        # 1. PACKAGE_SERVICE: specific tires/pads within count limits
-        cond_package = (
-            (p_name.isin(['Rear Tire KENDA', 'Front Tire KENDA']) & p_count.isin([1, 2])) |
-            (p_name.isin(['Rear Brake Pad', 'Front Brake Pad']) & p_count.isin(range(1, 7))) 
-            # Note: The notebook range(1,7) allows 1 to 6.
+        # Check customer type
+        if 'convert_customer_type' in self.df.columns:
+            is_electrum = self.df['convert_customer_type'].astype(str).str.upper() == 'ELECTRUM_USER'
+            is_partner = self.df['convert_customer_type'].astype(str).str.upper() == 'PARTNER_USER'
+        else:
+            is_electrum = pd.Series([False] * len(self.df), index=self.df.index)
+            is_partner = pd.Series([False] * len(self.df), index=self.df.index)
+        
+        # Calculate year-based reset for PARTNER_USER
+        # Reset "Pergantian Ke" every 12 months
+        if 'Bulan Ke' in self.df.columns:
+            bulan_ke = self.df['Bulan Ke']
+        else:
+            bulan_ke = pd.Series([0] * len(self.df), index=self.df.index)
+        year_cycle = (bulan_ke // 12).astype(int)
+        
+        # Group by Plate + Part + Year Cycle -> Cumulative Count (Reset per year)
+        # Store year_cycle as a temp column for groupby
+        self.df['_year_cycle'] = year_cycle
+        self.df['Pergantian Ke Reset'] = self.df.groupby(
+            ['vehicle_license_plate', 'Rekomendasi Nama Part Baru', '_year_cycle']
+        ).cumcount() + 1
+        self.df = self.df.drop(columns=['_year_cycle'])
+        
+        p_count_reset = self.df['Pergantian Ke Reset']
+        
+        # PACKAGE_SERVICE conditions:
+        # ELECTRUM_USER: Only Brake Pad (1-6), NO yearly reset
+        cond_package_electrum = (
+            is_electrum &
+            p_name.isin(['Rear Brake Pad', 'Front Brake Pad']) &
+            p_count.isin(range(1, 7))
         )
         
-        # 2. WARRANT: Month Age < Warranty Period
-        # Ensure Bulan Ke exists
-        current_month = self.df.get('Bulan Ke', 999) # Default to old if missing
-        warranty_period = self.df.get('Periode Garansi', 0)
+        # PARTNER_USER: Tire (1-2) + Brake Pad (1-6), WITH yearly reset
+        cond_package_partner = (
+            is_partner &
+            (
+                (p_name.isin(['Rear Tire KENDA', 'Front Tire KENDA']) & p_count_reset.isin([1, 2])) |
+                (p_name.isin(['Rear Brake Pad', 'Front Brake Pad']) & p_count_reset.isin(range(1, 7)))
+            )
+        )
+        
+        cond_package = cond_package_electrum | cond_package_partner
+        
+        # WARRANT: Month Age < Warranty Period
+        if 'Bulan Ke' in self.df.columns:
+            current_month = self.df['Bulan Ke']
+        else:
+            current_month = pd.Series([999] * len(self.df), index=self.df.index)
+        
+        if 'Periode Garansi' in self.df.columns:
+            warranty_period = self.df['Periode Garansi']
+        else:
+            warranty_period = pd.Series([0] * len(self.df), index=self.df.index)
         cond_warranty = (current_month < warranty_period)
-
-        # 3. INSURANCE: Specific body parts/mirrors (Placeholder logic from docs)
-        # Docs say: "Part yang tidak masuk kategori PACKAGE_SERVICE atau WARRANT, namun berkaitan dengan body part, frame, plate number + cover, atau spion"
-        # Since we don't have a category column for "Body Part", we might need a list or logic. 
-        # For now, I will use a placeholder or specific regex if provided.
-        # The notebook code snippet did NOT implement INSURANCE explicitly in the main block provided, 
-        # it just showed: choices = ['Paket Service', 'Paket Service', 'Garansi'].
-        # Wait, the notebook snippet choices were `['Paket Service', 'Paket Service', 'Garansi']`.
-        # The docs say:
-        # | PACKAGE_SERVICE | 1 |
-        # | WARRANT | 2 |
-        # | INSURANCE | 3 |
-        # | NOT_COVERED | 4 |
         
-        # I will check if 'INSURANCE' logic is available. 
-        # If not, I will stick to what the notebook `Coverage Logic` cell implemented plus a TODO.
-        # Notebook implemented:
-        # conds = [ (Tire/Pad & limit), (Age < Warranty) ]
-        # choices = ['Paket Service', 'Garansi']
-        # default = 'Berbayar'
-        
-        # I will implement the notebook logic first, then add Insurance if I can infer it.
-        # Docs say INSURANCE is priority 3.
-        
-        conds = [
-            cond_package,
-            cond_warranty
+        # INSURANCE: Body parts, frame, mirrors (Placeholder - can be extended)
+        insurance_parts = [
+            'Body Cover', 'Front Fender', 'Rear Fender', 'Side Cover',
+            'Rear Mirror', 'Plate Number Cover', 'Frame'
         ]
-        choices = ['Paket Service', 'Garansi']
+        cond_insurance = p_name.isin(insurance_parts)
         
-        self.df['Coverage'] = np.select(conds, choices, default='Berbayar')
-        self.df['Status Coverage'] = np.where(self.df['Coverage'].isin(['Garansi', 'Paket Service']), 'Electrum', 'Partner')
+        # Apply priority-based logic
+        conds = [
+            cond_package,    # Priority 1
+            cond_warranty,   # Priority 2
+            cond_insurance   # Priority 3
+        ]
+        choices = ['PACKAGE_SERVICE', 'WARRANT', 'INSURANCE']
+        
+        self.df['Warranty'] = np.select(conds, choices, default='NOT_COVERED')
+        
+        # Status Coverage (Electrum covers PACKAGE_SERVICE and WARRANT)
+        self.df['Status Coverage'] = np.where(
+            self.df['Warranty'].isin(['PACKAGE_SERVICE', 'WARRANT']), 
+            'Electrum', 
+            'Partner'
+        )
 
         # Location Type
         if 'service_location_name' in self.df.columns:

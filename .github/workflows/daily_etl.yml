@@ -1,12 +1,84 @@
-# Placeholder for GitHub Actions Workflow
-name: Daily ETL
+name: Daily ETL Pipeline
+
 on:
+  # Jadwal otomatis (cron) - Setiap hari jam 00:00 UTC (07:00 WIB)
   schedule:
     - cron: '0 0 * * *'
+  
+  # Trigger manual dari GitHub UI
+  workflow_dispatch:
+
 jobs:
-  build:
+  run-etl:
     runs-on: ubuntu-latest
+    
+    env:
+      # Non-sensitive config dari Variables
+      SAVE_LOCAL_CSV: ${{ vars.SAVE_LOCAL_CSV }}
+      STRICT_COMPLAINT_CLEANING: ${{ vars.STRICT_COMPLAINT_CLEANING }}
+      
+      # Worksheet names (tidak perlu secrets)
+      WORKSHEET_FORM_SERVICE: "Service History (2024-Jun 2025)"
+      WORKSHEET_SERVICE_GRAB: "Form responses 1"
+      WORKSHEET_FORM_RESPONSES: "Form Responses 1"
+      WORKSHEET_REQUEST_SPK: "DATA 2025"
+      WORKSHEET_AFTER_REPAIR: "List After Repair"
+      WORKSHEET_CABANG_KEMBANGAN: "Repair Kmb"
+      WORKSHEET_CABANG_DEPOK: "Repair DP"
+      WORKSHEET_CABANG_BEKASI: "Repair BK"
+      WORKSHEET_ASSET: "ALL BIKE NEW"
+      WORKSHEET_MEKANIK: "mekanik list"
+      WORKSHEET_TOP_KELUHAN: "top_keluhan"
+      WORKSHEET_OUTPUT: "work_orders"
+      WORKSHEET_BAD_OUTPUT: "bad_data"
+      WORKSHEET_MAPPINGS: "Mappings"
+      WORKSHEET_SERVICE_ITEMS: "service_items"
+      
+      # Sheet IDs dari Secrets
+      SHEET_ID_FORM_SERVICE: ${{ secrets.SHEET_ID_FORM_SERVICE }}
+      SHEET_ID_SERVICE_GRAB: ${{ secrets.SHEET_ID_SERVICE_GRAB }}
+      SHEET_ID_FORM_RESPONSES: ${{ secrets.SHEET_ID_FORM_RESPONSES }}
+      SHEET_ID_REQUEST_SPK: ${{ secrets.SHEET_ID_REQUEST_SPK }}
+      SHEET_ID_AFTER_REPAIR: ${{ secrets.SHEET_ID_AFTER_REPAIR }}
+      SHEET_ID_CABANG_KEMBANGAN: ${{ secrets.SHEET_ID_CABANG_KEMBANGAN }}
+      SHEET_ID_CABANG_DEPOK: ${{ secrets.SHEET_ID_CABANG_DEPOK }}
+      SHEET_ID_CABANG_BEKASI: ${{ secrets.SHEET_ID_CABANG_BEKASI }}
+      SHEET_ID_ASSET_LIST: ${{ secrets.SHEET_ID_ASSET_LIST }}
+      SHEET_ID_MEKANIK: ${{ secrets.SHEET_ID_MEKANIK }}
+      SHEET_KAMUS_KELUHAN: ${{ secrets.SHEET_KAMUS_KELUHAN }}
+      SHEET_ID_OUTPUT: ${{ secrets.SHEET_ID_OUTPUT }}
+      SHEET_ID_SERVICE_ITEMS: ${{ secrets.SHEET_ID_SERVICE_ITEMS }}
+      SHEET_ID_MAPPINGS: ${{ secrets.SHEET_ID_MAPPINGS }}
+
     steps:
-      - uses: actions/checkout@v2
-      - name: Run ETL
-        run: echo "Running ETL..."
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Create Google Credentials File
+        run: |
+          echo '${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}' > google_credentials.json
+      
+      - name: Run Work Orders ETL Pipeline
+        run: python -m src.pipelines.work_orders.run
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: "./google_credentials.json"
+      
+      - name: Run Service Items Pipeline
+        run: python -m src.pipelines.service_items.run
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: "./google_credentials.json"
+      
+      - name: Cleanup Credentials
+        if: always()
+        run: rm -f google_credentials.json
