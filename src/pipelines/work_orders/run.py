@@ -3,6 +3,7 @@ import pandas as pd
 import sys
 import os
 import warnings
+from datetime import datetime, timedelta
 from src.common.data_loader import DataLoader
 from src.pipelines.work_orders.transformers import ServiceDataPipeline, ServiceDataEnricher, MetadataEnricher
 from src.common.config import (
@@ -25,8 +26,13 @@ from src.common.utils import ServiceUtils
 from src.pipelines.work_orders.odometer_processor import OdometerProcessor
 from src.pipelines.work_orders.complaint_cleaner import ComplaintCleaner
 
+# Pipeline Mode Configuration
+PIPELINE_MODE = os.getenv('PIPELINE_MODE', 'full')  # 'full' or 'incremental'
+LOOKBACK_DAYS = int(os.getenv('LOOKBACK_DAYS', '2'))  # Days to look back for incremental mode
+
 def run_work_order_pipeline():
     print("🚀 Starting Work Order Pipeline (Modular)...")
+    print(f"   Mode: {PIPELINE_MODE.upper()}, Lookback: {LOOKBACK_DAYS} days")
     
     # Suppress warnings
     warnings.filterwarnings('ignore')
@@ -91,6 +97,19 @@ def run_work_order_pipeline():
     # Merge
     merged_df = pipeline.merge_and_finalize()
     print(f"   Total rows merged: {len(merged_df)}")
+    
+    # [INCREMENTAL MODE] Filter by date if incremental
+    if PIPELINE_MODE == 'incremental' and 'created_at' in merged_df.columns:
+        cutoff_date = datetime.now() - timedelta(days=LOOKBACK_DAYS)
+        merged_df['created_at'] = pd.to_datetime(merged_df['created_at'], errors='coerce')
+        
+        before_filter = len(merged_df)
+        merged_df = merged_df[merged_df['created_at'] >= cutoff_date]
+        print(f"   📅 Incremental filter: {before_filter} → {len(merged_df)} rows (last {LOOKBACK_DAYS} days)")
+        
+        if merged_df.empty:
+            print("   ℹ️ No new data to process. Exiting.")
+            return
     
     # 4. Enrichment & Business Logic
     print("\n🔗 Enriching & Cleaning...")
@@ -202,8 +221,14 @@ def run_work_order_pipeline():
     # 8. Upload to Google Sheets
     print("\n☁️ Uploading to Google Sheets...")
     
+    # Define deduplication keys
+    dedup_keys = ['order_id', 'vehicle_vin', 'vehicle_license_plate']
+    
     if SHEET_ID_OUTPUT and WORKSHEET_OUTPUT:
-        loader.upload_to_sheet(business_df, SHEET_ID_OUTPUT, WORKSHEET_OUTPUT)
+        if PIPELINE_MODE == 'incremental':
+            loader.append_to_sheet(business_df, SHEET_ID_OUTPUT, WORKSHEET_OUTPUT, key_columns=dedup_keys)
+        else:
+            loader.upload_to_sheet(business_df, SHEET_ID_OUTPUT, WORKSHEET_OUTPUT)
     else:
         print("⚠️ Skipping Final Data Upload: Missing SHEET_ID_OUTPUT or WORKSHEET_OUTPUT.")
 
@@ -214,7 +239,11 @@ def run_work_order_pipeline():
             if tech_df[col].dtype in ['float64', 'float32', 'int64', 'int32']:
                 tech_df[col] = tech_df[col].replace([np.inf, -np.inf], np.nan)
                 tech_df[col] = tech_df[col].where(pd.notna(tech_df[col]), None)
-        loader.upload_to_sheet(tech_df, SHEET_ID_OUTPUT, WORKSHEET_TECH_LOG)
+        
+        if PIPELINE_MODE == 'incremental':
+            loader.append_to_sheet(tech_df, SHEET_ID_OUTPUT, WORKSHEET_TECH_LOG, key_columns=dedup_keys)
+        else:
+            loader.upload_to_sheet(tech_df, SHEET_ID_OUTPUT, WORKSHEET_TECH_LOG)
     else:
         print("ℹ️ Skipping Tech Log Upload: WORKSHEET_TECH_LOG not configured.")
 

@@ -137,6 +137,134 @@ class DataLoader:
             print(f"❌ Error uploading to {worksheet_name}: {e}")
             raise e
     
+    def append_to_sheet(self, df, sheet_id, worksheet_name, key_columns=None):
+        """
+        Append new rows to existing sheet, checking for duplicates.
+        
+        Args:
+            df: DataFrame to append
+            sheet_id: Google Sheet ID
+            worksheet_name: Name of the worksheet
+            key_columns: List of columns to use for deduplication (default: ['order_id'])
+        """
+        import numpy as np
+        import math
+        
+        if key_columns is None:
+            key_columns = ['order_id']
+        
+        def make_json_safe(val):
+            """Convert any value to be JSON compliant."""
+            if val is None:
+                return None
+            if pd.isna(val):
+                return None
+            if isinstance(val, (float, np.floating)):
+                if math.isnan(val) or math.isinf(val):
+                    return None
+                return float(val)
+            if isinstance(val, (np.integer,)):
+                return int(val)
+            if isinstance(val, np.bool_):
+                return bool(val)
+            if isinstance(val, (pd.Timestamp, np.datetime64)):
+                try:
+                    ts = pd.Timestamp(val)
+                    if pd.isna(ts):
+                        return None
+                    if ts.hour == 0 and ts.minute == 0 and ts.second == 0:
+                        return ts.strftime('%Y-%m-%d')
+                    return ts.strftime('%Y-%m-%d %H:%M:%S')
+                except:
+                    return str(val) if val else None
+            if isinstance(val, str):
+                return val if val.strip() else None
+            if isinstance(val, (np.ndarray, list)):
+                return str(val)
+            return val
+        
+        try:
+            print(f"📤 Appending up to {len(df)} rows to {worksheet_name}...")
+            sheet = self.client.open_by_key(sheet_id)
+            
+            try:
+                worksheet = sheet.worksheet(worksheet_name)
+            except gspread.WorksheetNotFound:
+                print(f"⚠️ Worksheet '{worksheet_name}' not found. Creating with full data...")
+                # If sheet doesn't exist, create and upload all
+                return self.upload_to_sheet(df, sheet_id, worksheet_name)
+            
+            # Read existing data to check for duplicates
+            existing_data = worksheet.get_all_values()
+            
+            if not existing_data:
+                print("   Sheet is empty, uploading all data...")
+                return self.upload_to_sheet(df, sheet_id, worksheet_name)
+            
+            existing_headers = existing_data[0]
+            existing_rows = existing_data[1:]
+            
+            # Build set of existing keys for fast lookup
+            existing_keys = set()
+            key_indices = []
+            
+            for col in key_columns:
+                if col in existing_headers:
+                    key_indices.append(existing_headers.index(col))
+            
+            if not key_indices:
+                print(f"   ⚠️ Key columns {key_columns} not found in sheet. Appending all...")
+            else:
+                for row in existing_rows:
+                    key_parts = []
+                    for idx in key_indices:
+                        if idx < len(row):
+                            key_parts.append(str(row[idx]).strip().lower())
+                    if key_parts:
+                        existing_keys.add(tuple(key_parts))
+                
+                print(f"   Found {len(existing_keys)} existing records.")
+            
+            # Filter out duplicates from new data
+            new_rows = []
+            skipped = 0
+            
+            for idx, row in df.iterrows():
+                # Build key from new row
+                key_parts = []
+                for col in key_columns:
+                    if col in df.columns:
+                        val = row[col]
+                        key_parts.append(str(val).strip().lower() if pd.notna(val) else '')
+                
+                key_tuple = tuple(key_parts)
+                
+                if key_tuple in existing_keys:
+                    skipped += 1
+                    continue
+                
+                # Convert row to JSON-safe list
+                safe_row = [make_json_safe(val) for val in row.values]
+                new_rows.append(safe_row)
+                existing_keys.add(key_tuple)  # Prevent duplicates within batch
+            
+            if not new_rows:
+                print(f"   ℹ️ No new rows to append (skipped {skipped} duplicates).")
+                return
+            
+            print(f"   Adding {len(new_rows)} new rows (skipped {skipped} duplicates)...")
+            
+            # Calculate next row position
+            next_row = len(existing_data) + 1
+            
+            # Append new rows
+            worksheet.update(f'A{next_row}', new_rows, value_input_option='USER_ENTERED')
+            print(f"✅ Successfully appended {len(new_rows)} rows to {worksheet_name}.")
+            
+        except Exception as e:
+            print(f"❌ Error appending to {worksheet_name}: {e}")
+            raise e
+    
     def _prepare_df_for_upload(self, df):
         """
         Internal function to clean and format DataFrame before upload.

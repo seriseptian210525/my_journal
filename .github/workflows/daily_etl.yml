@@ -13,6 +13,14 @@ on:
           - all
           - work_orders
           - service_items
+      mode:
+        description: 'Pipeline mode (full = clear & replace, incremental = append only)'
+        required: true
+        default: 'incremental'
+        type: choice
+        options:
+          - full
+          - incremental
 
   # Jadwal otomatis (cron) - GitHub uses UTC timezone
   schedule:
@@ -35,6 +43,9 @@ jobs:
     env:
       SAVE_LOCAL_CSV: ${{ vars.SAVE_LOCAL_CSV }}
       STRICT_COMPLAINT_CLEANING: ${{ vars.STRICT_COMPLAINT_CLEANING }}
+      # Pipeline mode: cron uses incremental, manual uses selected mode
+      PIPELINE_MODE: ${{ github.event_name == 'schedule' && 'incremental' || github.event.inputs.mode }}
+      LOOKBACK_DAYS: "2"
       
       # Worksheet names
       WORKSHEET_FORM_SERVICE: "Service History (2024-Jun 2025)"
