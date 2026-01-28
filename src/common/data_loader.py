@@ -89,9 +89,11 @@ class DataLoader:
     def _prepare_df_for_upload(self, df):
         """
         Internal function to clean and format DataFrame before upload.
-        - Converts datetime columns to string with appropriate format (date or datetime).
-        - Replaces infinity and NaN with empty string.
-        - Preserves numeric types for proper Google Sheets interpretation.
+        Makes data fully compatible with Google Sheets API by:
+        - Converting datetime columns to ISO string format
+        - Converting numpy types to native Python types
+        - Replacing NaN/inf with None (becomes empty cell in Sheets)
+        - Ensuring no type conflicts in the final data
         """
         import numpy as np
         
@@ -101,15 +103,37 @@ class DataLoader:
         for col in df_copy.columns:
             if pd.api.types.is_datetime64_any_dtype(df_copy[col]):
                 # Check if all non-null values are date-only (no time component)
-                is_date_only = (df_copy[col].dropna().dt.normalize() == df_copy[col].dropna()).all()
-                if is_date_only:
-                    df_copy[col] = df_copy[col].dt.strftime('%Y-%m-%d')
-                else:
-                    df_copy[col] = df_copy[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+                non_null = df_copy[col].dropna()
+                if len(non_null) > 0:
+                    is_date_only = (non_null.dt.normalize() == non_null).all()
+                    if is_date_only:
+                        df_copy[col] = df_copy[col].dt.strftime('%Y-%m-%d')
+                    else:
+                        df_copy[col] = df_copy[col].dt.strftime('%Y-%m-%d %H:%M:%S')
 
-        # Replace infinity values with NaN, then fill NaN with empty string
+        # Replace infinity values with NaN
         df_copy.replace([np.inf, -np.inf], np.nan, inplace=True)
-        df_copy.fillna('', inplace=True)
+        
+        # Convert all values to native Python types for Google Sheets compatibility
+        def convert_value(val):
+            """Convert a single value to Google Sheets compatible format."""
+            if pd.isna(val):
+                return None  # Will become empty cell
+            if isinstance(val, (np.integer, np.int64, np.int32)):
+                return int(val)
+            if isinstance(val, (np.floating, np.float64, np.float32)):
+                return float(val) if not np.isnan(val) else None
+            if isinstance(val, np.bool_):
+                return bool(val)
+            if isinstance(val, (np.ndarray, list)):
+                return str(val)
+            if isinstance(val, str):
+                return val if val != '' else None  # Empty string -> empty cell
+            return val
+        
+        # Apply conversion to all cells
+        for col in df_copy.columns:
+            df_copy[col] = df_copy[col].apply(convert_value)
         
         return df_copy
 
