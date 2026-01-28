@@ -159,6 +159,8 @@ def run_work_order_pipeline():
         business_df.sort_values(by='created_at', ascending=True, inplace=True)
     
     key_cols = ['order_id', 'created_at', 'vehicle_vin', 'vehicle_license_plate']
+    # Filter to only include columns that exist
+    key_cols = [c for c in key_cols if c in final_df.columns]
     tech_cols_to_use = [c for c in tech_columns if c in final_df.columns]
     tech_df = final_df[key_cols + tech_cols_to_use].copy()
 

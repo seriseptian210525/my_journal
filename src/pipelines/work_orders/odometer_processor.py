@@ -188,5 +188,9 @@ class OdometerProcessor:
         print("   -> Running Smart Monotonic Repair (with Rounding)...")
         df_cleaned = df.groupby("vehicle_vin", group_keys=False).apply(self._repair_group)
         
+        # Ensure vehicle_vin is preserved as a column (not just part of index)
+        if "vehicle_vin" not in df_cleaned.columns and df_cleaned.index.name == "vehicle_vin":
+            df_cleaned = df_cleaned.reset_index()
+        
         print("Odometer Cleaning Pipeline Completed.")
         return df_cleaned
