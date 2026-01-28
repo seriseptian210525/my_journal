@@ -208,6 +208,12 @@ def run_work_order_pipeline():
         print("⚠️ Skipping Final Data Upload: Missing SHEET_ID_OUTPUT or WORKSHEET_OUTPUT.")
 
     if SHEET_ID_OUTPUT and WORKSHEET_TECH_LOG:
+        # Safeguard: Clean float columns to avoid dtype errors
+        import numpy as np
+        for col in tech_df.columns:
+            if tech_df[col].dtype in ['float64', 'float32', 'int64', 'int32']:
+                tech_df[col] = tech_df[col].replace([np.inf, -np.inf], np.nan)
+                tech_df[col] = tech_df[col].where(pd.notna(tech_df[col]), None)
         loader.upload_to_sheet(tech_df, SHEET_ID_OUTPUT, WORKSHEET_TECH_LOG)
     else:
         print("ℹ️ Skipping Tech Log Upload: WORKSHEET_TECH_LOG not configured.")
