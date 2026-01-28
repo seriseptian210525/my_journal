@@ -61,6 +61,54 @@ class DataLoader:
         Replaces existing content.
         Uses USER_ENTERED option to preserve numeric and date formats.
         """
+        import numpy as np
+        import math
+        
+        def make_json_safe(val):
+            """Convert any value to be JSON compliant."""
+            if val is None:
+                return None
+            
+            # Handle pandas NaT
+            if pd.isna(val):
+                return None
+            
+            # Handle numpy/python floats - check for inf/nan
+            if isinstance(val, (float, np.floating)):
+                if math.isnan(val) or math.isinf(val):
+                    return None
+                return float(val)
+            
+            # Handle numpy integers
+            if isinstance(val, (np.integer,)):
+                return int(val)
+            
+            # Handle numpy bool
+            if isinstance(val, np.bool_):
+                return bool(val)
+            
+            # Handle datetime
+            if isinstance(val, (pd.Timestamp, np.datetime64)):
+                try:
+                    ts = pd.Timestamp(val)
+                    if pd.isna(ts):
+                        return None
+                    if ts.hour == 0 and ts.minute == 0 and ts.second == 0:
+                        return ts.strftime('%Y-%m-%d')
+                    return ts.strftime('%Y-%m-%d %H:%M:%S')
+                except:
+                    return str(val) if val else None
+            
+            # Handle strings - empty strings become None
+            if isinstance(val, str):
+                return val if val.strip() else None
+            
+            # Handle numpy arrays/lists
+            if isinstance(val, (np.ndarray, list)):
+                return str(val)
+            
+            return val
+        
         try:
             print(f"📤 Uploading {len(df)} rows to {worksheet_name}...")
             sheet = self.client.open_by_key(sheet_id)
@@ -70,14 +118,17 @@ class DataLoader:
                 print(f"⚠️ Worksheet '{worksheet_name}' not found. Creating it...")
                 worksheet = sheet.add_worksheet(title=worksheet_name, rows=len(df)+100, cols=len(df.columns))
 
-            # Prepare dataframe for upload
-            df_clean = self._prepare_df_for_upload(df)
+            # Build data with guaranteed JSON safety
+            headers = [str(col) for col in df.columns.tolist()]
+            rows = []
             
-            # Prepare data: header + rows
-            data = [df_clean.columns.values.tolist()] + df_clean.values.tolist()
+            for idx, row in df.iterrows():
+                safe_row = [make_json_safe(val) for val in row.values]
+                rows.append(safe_row)
+            
+            data = [headers] + rows
             
             # Clear and update with USER_ENTERED option
-            # This makes Google Sheets parse values as if user typed them directly
             worksheet.clear()
             worksheet.update('A1', data, value_input_option='USER_ENTERED')
             print(f"✅ Successfully uploaded to {worksheet_name}.")
