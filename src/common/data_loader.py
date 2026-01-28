@@ -89,53 +89,86 @@ class DataLoader:
     def _prepare_df_for_upload(self, df):
         """
         Internal function to clean and format DataFrame before upload.
-        Makes data fully compatible with Google Sheets API by:
-        - Converting datetime columns to ISO string format
-        - Converting numpy types to native Python types
-        - Replacing NaN/inf with None (becomes empty cell in Sheets)
-        - Ensuring no type conflicts in the final data
+        Uses a safe approach that converts everything to native Python types
+        without relying on pandas operations that can fail on mixed types.
         """
         import numpy as np
         
-        df_copy = df.copy()
-
-        # Smart datetime formatting - detect date-only vs datetime
-        for col in df_copy.columns:
-            if pd.api.types.is_datetime64_any_dtype(df_copy[col]):
-                # Check if all non-null values are date-only (no time component)
-                non_null = df_copy[col].dropna()
-                if len(non_null) > 0:
-                    is_date_only = (non_null.dt.normalize() == non_null).all()
-                    if is_date_only:
-                        df_copy[col] = df_copy[col].dt.strftime('%Y-%m-%d')
-                    else:
-                        df_copy[col] = df_copy[col].dt.strftime('%Y-%m-%d %H:%M:%S')
-
-        # Replace infinity values with NaN
-        df_copy.replace([np.inf, -np.inf], np.nan, inplace=True)
-        
-        # Convert all values to native Python types for Google Sheets compatibility
-        def convert_value(val):
-            """Convert a single value to Google Sheets compatible format."""
-            if pd.isna(val):
-                return None  # Will become empty cell
-            if isinstance(val, (np.integer, np.int64, np.int32)):
+        def safe_convert(val):
+            """Convert any value to Google Sheets compatible format."""
+            # Handle None and NaN
+            if val is None:
+                return None
+            
+            # Handle pandas NaT (Not a Time)
+            if isinstance(val, pd.NaT.__class__):
+                return None
+            
+            # Check for NaN (works for numpy and python floats)
+            try:
+                if pd.isna(val):
+                    return None
+            except (TypeError, ValueError):
+                pass
+            
+            # Handle infinity
+            try:
+                if np.isinf(val):
+                    return None
+            except (TypeError, ValueError):
+                pass
+            
+            # Handle numpy integer types
+            if isinstance(val, (np.integer, np.int64, np.int32, np.int16, np.int8)):
                 return int(val)
-            if isinstance(val, (np.floating, np.float64, np.float32)):
-                return float(val) if not np.isnan(val) else None
+            
+            # Handle numpy float types
+            if isinstance(val, (np.floating, np.float64, np.float32, np.float16)):
+                if np.isnan(val) or np.isinf(val):
+                    return None
+                return float(val)
+            
+            # Handle numpy bool
             if isinstance(val, np.bool_):
                 return bool(val)
+            
+            # Handle datetime types
+            if isinstance(val, (pd.Timestamp, np.datetime64)):
+                try:
+                    ts = pd.Timestamp(val)
+                    if pd.isna(ts):
+                        return None
+                    # Check if date-only (no time component)
+                    if ts.hour == 0 and ts.minute == 0 and ts.second == 0 and ts.microsecond == 0:
+                        return ts.strftime('%Y-%m-%d')
+                    return ts.strftime('%Y-%m-%d %H:%M:%S')
+                except:
+                    return str(val)
+            
+            # Handle numpy arrays and lists
             if isinstance(val, (np.ndarray, list)):
                 return str(val)
+            
+            # Handle strings
             if isinstance(val, str):
-                return val if val != '' else None  # Empty string -> empty cell
+                return val if val.strip() != '' else None
+            
+            # For everything else, return as-is
             return val
         
-        # Apply conversion to all cells
-        for col in df_copy.columns:
-            df_copy[col] = df_copy[col].apply(convert_value)
+        # Convert DataFrame to list of lists with safe conversion
+        # This avoids all pandas dtype issues
+        headers = df.columns.tolist()
+        rows = []
         
-        return df_copy
+        for idx, row in df.iterrows():
+            converted_row = [safe_convert(val) for val in row.values]
+            rows.append(converted_row)
+        
+        # Create new DataFrame from converted data
+        df_clean = pd.DataFrame(rows, columns=headers)
+        
+        return df_clean
 
 # Legacy support functions (to be deprecated)
 def get_gspread_client():
