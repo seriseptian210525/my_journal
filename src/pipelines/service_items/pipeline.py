@@ -396,7 +396,7 @@ class ServiceItemsPipeline:
         if self.df is None:
             raise ValueError("Pipeline has not been run. Call run() first.")
         
-        # ERP Product IDs with default Qty = 2
+        # ERP Product IDs with default Qty = 2 (these parts always come in pairs)
         DEFAULT_QTY_2_ERP_IDS = [1735, 1742, 1736, 1762]
         
         # Create a copy to avoid modifying original
@@ -407,27 +407,20 @@ class ServiceItemsPipeline:
             output_df['ERP Product ID'] = pd.to_numeric(output_df['ERP Product ID'], errors='coerce').fillna(0).astype(int)
         
         # Calculate Qty
-        # Step 1: Count occurrences of same Product Name within same Order Number
-        if 'order_id' in output_df.columns and 'Product Name' in output_df.columns:
-            output_df['_count'] = output_df.groupby(['order_id', 'Product Name'])['Product Name'].transform('count')
-        else:
-            output_df['_count'] = 1
-        
-        # Step 2: Apply default Qty=2 for specific ERP Product IDs, otherwise use count
+        # For individual tracking (rekam medis per aset), each row = 1 item
+        # Exception: specific ERP Product IDs always Qty=2 (e.g., paired parts)
         if 'ERP Product ID' in output_df.columns:
             output_df['Qty'] = np.where(
                 output_df['ERP Product ID'].isin(DEFAULT_QTY_2_ERP_IDS),
                 2,
-                output_df['_count']
+                1  # Each record = 1 item for individual tracking
             )
         else:
-            output_df['Qty'] = output_df['_count']
+            output_df['Qty'] = 1
         
-        output_df = output_df.drop(columns=['_count'])
-        
-        # Deduplicate rows with same order_id + Product Name (keep first, Qty already calculated)
-        if 'order_id' in output_df.columns and 'Product Name' in output_df.columns:
-            output_df = output_df.drop_duplicates(subset=['order_id', 'Product Name'], keep='first')
+        # NO DEDUPLICATION - keep all individual records for vehicle medical record tracking
+        # Each part replacement is a separate record (FR and RR are 2 items)
+
         
         # Ensure Base Price is numeric
         if 'Base Price' in output_df.columns:
