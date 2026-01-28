@@ -23,6 +23,7 @@ class OdometerProcessor:
         g[self.config.COL_ODO_CLEAN] = g["odometer_stage1"].copy()
         
         col_idx_clean = g.columns.get_loc(self.config.COL_ODO_CLEAN)
+        col_idx_created_at = g.columns.get_loc("created_at")
         is_anomaly_idx = g.columns.get_loc("is_anomaly_rule")
         
         # Ambil delivery date
@@ -33,11 +34,11 @@ class OdometerProcessor:
                 delivery_date = valid_dates.iloc[0]
 
         for i in range(len(g)):
-            curr_date = g.iloc[i]["created_at"]
+            curr_date = g.iat[i, col_idx_created_at]
             
             # --- LOGIC BARIS PERTAMA (i=0) ---
             if i == 0:
-                curr_odo = g.iloc[i][col_idx_clean]
+                curr_odo = g.iat[i, col_idx_clean]
                 if pd.notna(curr_odo) and curr_odo > 0: 
                     continue
                 
@@ -52,9 +53,9 @@ class OdometerProcessor:
                 continue
             
             # --- LOGIC BARIS SELANJUTNYA (i>0) ---
-            curr_odo_raw = g.iloc[i][col_idx_clean]
-            prev_odo_clean = g.iloc[i-1][col_idx_clean]  # Clean prev
-            prev_date = g.iloc[i-1]["created_at"]
+            curr_odo_raw = g.iat[i, col_idx_clean]
+            prev_odo_clean = g.iat[i-1, col_idx_clean]  # Clean prev
+            prev_date = g.iat[i-1, col_idx_created_at]
 
             if pd.isna(prev_odo_clean) or pd.isna(prev_date) or pd.isna(curr_date):
                 continue
