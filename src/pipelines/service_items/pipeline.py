@@ -197,9 +197,9 @@ class ServiceItemsPipeline:
 
         target_parts = [p for p in self.mapping_df['Rekomendasi Nama Part Baru'].unique() if pd.notna(p)]
 
-        # Fuzzy Match
+        # Fuzzy Match (threshold 80% for better coverage)
         self.df['Rekomendasi Nama Part Baru'] = self.df['mapped_item_name'].progress_apply(
-            lambda x: self._smart_fuzzy_match(x, target_parts, threshold=85)
+            lambda x: self._smart_fuzzy_match(x, target_parts, threshold=80)
         )
 
         # --- TRACK IGNORED PARTS ---
