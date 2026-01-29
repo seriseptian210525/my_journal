@@ -434,7 +434,35 @@ class ServiceItemsPipeline:
         # Calculate Final Price (= Base Price, since we're not calculating INTERNAL_COVER)
         output_df['Final Price'] = output_df['Base Price']
         
-        # Calculate Subtotal Price (Base Price * Qty)
+        # ---------------------------------------------------------
+        # AGGREGATION LOGIC (Requested by User)
+        # Group by Order + SKU + Warranty to aggregate Qty
+        # ---------------------------------------------------------
+        if 'New SKU' in output_df.columns:
+             # Fill NaN SKU to allow grouping (will restore later if needed, or leave as is)
+             output_df['New SKU'] = output_df['New SKU'].fillna('NO_SKU')
+             
+             # Grouping Keys
+             group_keys = ['order_id', 'New SKU', 'Warranty']
+             
+             # Define aggregation dict
+             # Qty: Sum
+             # Others: First (representative)
+             agg_dict = {'Qty': 'sum'}
+             
+             # Add all other columns to take 'first'
+             for col in output_df.columns:
+                 if col not in group_keys and col != 'Qty':
+                     agg_dict[col] = 'first'
+                     
+             # Perform GroupBy
+             # Note: This merges "Front Tire" and "Rear Tire" if they share the same SKU
+             output_df = output_df.groupby(group_keys, as_index=False).agg(agg_dict)
+             
+             # Restore NaN for NO_SKU (Optional, but 'NO_SKU' string is fine for output)
+             output_df['New SKU'] = output_df['New SKU'].replace('NO_SKU', np.nan)
+
+        # Recalculate Subtotal with new Aggregated Qty
         output_df['Subtotal Price'] = output_df['Base Price'] * output_df['Qty']
         
         # Add static columns
