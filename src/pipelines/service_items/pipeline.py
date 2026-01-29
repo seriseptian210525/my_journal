@@ -328,12 +328,16 @@ class ServiceItemsPipeline:
             p_count.isin(range(1, 7))
         )
         
-        # PARTNER_USER: Tire (1-2) + Brake Pad (1-6), WITH yearly reset
+        # PARTNER_USER (Grab): 
+        # Tire: 4 pcs (2 sets) -> 1, 2, 3, 4
+        # Brake Pad: 8 pcs (4 sets) -> 1 to 8
+        # Bearing 6201 (Front): 4 pcs (2 sets) -> 1, 2, 3, 4
         cond_package_partner = (
             is_partner &
             (
-                (p_name.isin(['Rear Tire KENDA', 'Front Tire KENDA']) & p_count_reset.isin([1, 2])) |
-                (p_name.isin(['Rear Brake Pad', 'Front Brake Pad']) & p_count_reset.isin(range(1, 7)))
+                (p_name.isin(['Rear Tire KENDA', 'Front Tire KENDA']) & p_count_reset.isin(range(1, 5))) |
+                (p_name.isin(['Rear Brake Pad', 'Front Brake Pad']) & p_count_reset.isin(range(1, 9))) |
+                (p_name.isin(['Bearing 6201']) & p_count_reset.isin(range(1, 5)))
             )
         )
         
