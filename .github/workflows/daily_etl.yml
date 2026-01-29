@@ -128,6 +128,10 @@ jobs:
       SHEET_ID_OUTPUT: ${{ secrets.SHEET_ID_OUTPUT }}
       SHEET_ID_SERVICE_ITEMS: ${{ secrets.SHEET_ID_SERVICE_ITEMS }}
       SHEET_ID_MAPPINGS: ${{ secrets.SHEET_ID_MAPPINGS }}
+      SHEET_ID_ASSET_LIST: ${{ secrets.SHEET_ID_ASSET_LIST }}
+
+      WORKSHEET_ASSET: "ALL BIKE NEW"
+      WORKSHEET_IGNORE_PART: "ignore_part"
 
     steps:
       - name: Checkout Repository
