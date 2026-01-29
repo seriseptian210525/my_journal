@@ -142,8 +142,8 @@ class ServiceItemsPipeline:
         """
         print(">>> [Step 2] Running Regex Mapping...")
 
-        # Clean item name for matching
-        self.df['item_name_cleaned'] = self.df['item_name'].astype(str).str.replace(r'[\[\]\(\)]', '', regex=True)
+        # Clean item name for matching (only strip whitespace, keep brackets/parens)
+        self.df['item_name_cleaned'] = self.df['item_name'].astype(str).str.strip()
         
         conditions = []
         values = []
