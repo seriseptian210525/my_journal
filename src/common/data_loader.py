@@ -257,6 +257,15 @@ class DataLoader:
             # Calculate next row position
             next_row = len(existing_data) + 1
             
+            # Check if we need to expand the sheet
+            required_rows = next_row + len(new_rows) - 1
+            current_max_rows = worksheet.row_count
+            
+            if required_rows > current_max_rows:
+                rows_to_add = required_rows - current_max_rows + 100  # Add buffer
+                print(f"   📏 Expanding sheet by {rows_to_add} rows...")
+                worksheet.add_rows(rows_to_add)
+            
             # Append new rows
             worksheet.update(f'A{next_row}', new_rows, value_input_option='USER_ENTERED')
             print(f"✅ Successfully appended {len(new_rows)} rows to {worksheet_name}.")
