@@ -198,9 +198,12 @@ class ServiceItemsPipeline:
         target_parts = [p for p in self.mapping_df['Rekomendasi Nama Part Baru'].unique() if pd.notna(p)]
 
         # Fuzzy Match (threshold 80% for better coverage)
-        self.df['Rekomendasi Nama Part Baru'] = self.df['mapped_item_name'].progress_apply(
+        # Use regular apply to avoid tqdm/pandas version compatibility issues
+        print(f"   Processing {len(self.df)} rows...")
+        self.df['Rekomendasi Nama Part Baru'] = self.df['mapped_item_name'].apply(
             lambda x: self._smart_fuzzy_match(x, target_parts, threshold=80)
         )
+        print(f"   Fuzzy matching complete.")
 
         # --- TRACK IGNORED PARTS ---
         # 1. Items with no fuzzy match (NaN)
