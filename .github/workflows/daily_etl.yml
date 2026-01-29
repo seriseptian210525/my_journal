@@ -35,10 +35,11 @@ jobs:
   # ========================================
   work-orders:
     runs-on: ubuntu-latest
-    # Run if: cron 00:00 OR manual with 'all' or 'work_orders'
-    if: |
-      github.event.schedule == '0 17 * * *' ||
-      github.event_name == 'workflow_dispatch' && (github.event.inputs.pipeline == 'all' || github.event.inputs.pipeline == 'work_orders')
+    # Run if: cron 17:00 UTC OR manual with 'all' or 'work_orders'
+    if: >-
+      (github.event.schedule == '0 17 * * *') ||
+      (github.event_name == 'workflow_dispatch' && 
+       (github.event.inputs.pipeline == 'all' || github.event.inputs.pipeline == 'work_orders'))
     
     env:
       SAVE_LOCAL_CSV: ${{ vars.SAVE_LOCAL_CSV }}
@@ -109,10 +110,11 @@ jobs:
   # ========================================
   service-items:
     runs-on: ubuntu-latest
-    # Run if: cron 00:30 OR manual with 'all' or 'service_items'
-    if: |
-      github.event.schedule == '0 18 * * *' ||
-      github.event_name == 'workflow_dispatch' && (github.event.inputs.pipeline == 'all' || github.event.inputs.pipeline == 'service_items')
+    # Run if: cron 18:00 UTC OR manual with 'all' or 'service_items'
+    if: >-
+      (github.event.schedule == '0 18 * * *') ||
+      (github.event_name == 'workflow_dispatch' && 
+       (github.event.inputs.pipeline == 'all' || github.event.inputs.pipeline == 'service_items'))
     
     env:
       SAVE_LOCAL_CSV: ${{ vars.SAVE_LOCAL_CSV }}
