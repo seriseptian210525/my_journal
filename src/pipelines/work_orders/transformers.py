@@ -516,67 +516,114 @@ class ServiceDataEnricher:
         
         return self
 
-    def standardize_location_names(self):
-        """Standardize service_location_name and map to service_location_id"""
+    def standardize_location_names(self, location_df=None):
+        """Standardize service_location_name and map to service_location_id using master data."""
         print("🚀 Standardizing Location Names & Mapping IDs...")
         
-        # [UPDATED] UUID Mapping
-        LOCATION_MAP = {
-            "Pondok Indah": "657d2142-f5d1-436d-8eb4-1f2569c84816",
-            "Kembangan": "db98ae78-f9f6-4c58-968d-83613fb9fde9",
-            "Depok": "231d1bba-1768-4b07-acf9-0dc5c59ff6bb",
-            "Bekasi": "2e6de234-b935-4f01-99fa-07f932846617",
-            "Grab-Cakung": "68c61879-7a70-46f6-8748-f3f2f6800ba4" 
-        }
+        # Build location map from master data or use fallback
+        location_map = {}
+        alias_map = {}
+        pattern_list = []  # List of (compiled_regex, name, id)
+        
+        if location_df is not None and not location_df.empty:
+            for _, row in location_df.iterrows():
+                loc_id = str(row.get('id', '')).strip()
+                loc_name = str(row.get('name', '')).strip()
+                pattern = str(row.get('pattern', '')).strip()
+                
+                if loc_id and loc_name and loc_id != 'nan' and loc_name != 'nan':
+                    location_map[loc_name] = loc_id
+                    alias_map[loc_name.lower()] = (loc_name, loc_id)
+                    
+                    # Build regex patterns
+                    if pattern and pattern != 'nan' and pattern != '':
+                        try:
+                            compiled = re.compile(pattern, re.IGNORECASE)
+                            pattern_list.append((compiled, loc_name, loc_id))
+                        except re.error:
+                            print(f"   ⚠️ Invalid regex for {loc_name}: {pattern}")
+            
+            print(f"   ✅ Loaded {len(location_map)} locations, {len(pattern_list)} patterns")
+        else:
+            # Fallback hardcoded map
+            print("   ⚠️ Using fallback hardcoded location map.")
+            location_map = {
+                "Pondok Indah": "657d2142-f5d1-436d-8eb4-1f2569c84816",
+                "Kembangan": "db98ae78-f9f6-4c58-968d-83613fb9fde9",
+                "Depok": "231d1bba-1768-4b07-acf9-0dc5c59ff6bb",
+                "Bekasi": "2e6de234-b935-4f01-99fa-07f932846617",
+                "Grab - Cakung": "68c61879-7a70-46f6-8748-f3f2f6800ba4"
+            }
+            alias_map = {k.lower(): (k, v) for k, v in location_map.items()}
 
         def _resolve_location(row):
-            """Returns tuple (normalized_name, location_id)"""
+            """Returns tuple (name, id, is_null, status)"""
             loc = row.get('service_location_name')
-            stype = row.get('service_type')
-
-            # 1. Handle Official Partner Service -> ID is Null
-            if str(stype) == 'Official Partner Service':
-                return loc, None
-
-            if pd.isna(loc): return loc, None
+            data_source = row.get('data_source', '')
+            
+            # Empty/null check
+            if pd.isna(loc) or str(loc).strip() == '' or str(loc).lower() == 'nan':
+                return None, None, True, f"EMPTY:{data_source}"
             
             loc_str = str(loc).strip()
-            norm_name = loc_str # Default
-
-            # 2. Keywords Normalization
-            # Check for Grab Cakung
-            if any(keyword in loc_str for keyword in ['Grab', 'Cakung', 'grab', 'cakung']):
-                norm_name = "Grab-Cakung"
+            loc_lower = loc_str.lower()
             
-            # Check for Pondok Indah
-            elif any(keyword in loc_str for keyword in ['Electrum', 'Pondok Indah', 'electrum', 'pondok indah']):
+            # 1. Exact match in alias map
+            if loc_lower in alias_map:
+                norm_name, loc_id = alias_map[loc_lower]
+                return norm_name, loc_id, False, "EXACT_MATCH"
+            
+            # 2. Pattern/Regex match
+            for compiled_regex, norm_name, loc_id in pattern_list:
+                if compiled_regex.search(loc_str):
+                    return norm_name, loc_id, False, "PATTERN_MATCH"
+            
+            # 3. Keyword-based matching (fallback)
+            norm_name = loc_str
+            
+            if any(kw in loc_lower for kw in ['grab', 'cakung']):
+                norm_name = "Grab - Cakung"
+            elif any(kw in loc_lower for kw in ['electrum', 'pondok indah']):
                 norm_name = "Pondok Indah"
+            elif 'kembangan' in loc_lower:
+                norm_name = "Kembangan"
+            elif 'depok' in loc_lower:
+                norm_name = "Depok"
+            elif 'bekasi' in loc_lower:
+                norm_name = "Bekasi"
             
-            elif "Kembangan" in loc_str: norm_name = "Kembangan"
-            elif "Depok" in loc_str: norm_name = "Depok"
-            elif "Bekasi" in loc_str: norm_name = "Bekasi"
+            # Try lookup after normalization
+            if norm_name.lower() in alias_map:
+                resolved_name, loc_id = alias_map[norm_name.lower()]
+                return resolved_name, loc_id, False, "KEYWORD_MATCH"
             
-            # 3. Lookup ID
-            loc_id = LOCATION_MAP.get(norm_name, None)
+            loc_id = location_map.get(norm_name)
             
-            return norm_name, loc_id
+            if loc_id:
+                return norm_name, loc_id, False, "KEYWORD_MATCH"
+            else:
+                return norm_name, None, True, f"NOT_IN_MASTER:{loc_str}"
         
-        # Apply Logic
+        # Apply logic
         if 'service_location_name' in self.df.columns:
-            # We need row-wise access for service_type check
             results = self.df.apply(_resolve_location, axis=1)
             
             self.df['service_location_name'] = results.apply(lambda x: x[0])
             self.df['service_location_id'] = results.apply(lambda x: x[1])
+            self.df['location_is_null'] = results.apply(lambda x: x[2])
+            self.df['location_resolve_status'] = results.apply(lambda x: x[3])
+            
+            # Stats
+            null_count = self.df['location_is_null'].sum()
+            total = len(self.df)
+            print(f"   📊 Stats: {total - null_count}/{total} mapped ({null_count} null)")
         else:
-             self.df['service_location_id'] = None
+            self.df['service_location_id'] = None
+            self.df['location_is_null'] = True
+            self.df['location_resolve_status'] = 'NO_COLUMN'
         
         return self
 
-        if 'service_location_name' in self.df.columns:
-            self.df['service_location_name'] = self.df['service_location_name'].apply(_standardize_location)
-        
-        return self
 
     def normalize_service_type(self):
         """

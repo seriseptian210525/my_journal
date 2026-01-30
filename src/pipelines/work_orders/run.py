@@ -20,7 +20,9 @@ from src.common.config import (
     SHEET_ID_MEKANIK, WORKSHEET_MEKANIK,
     PipelineConfig,
     WORKSHEET_TECH_LOG,
-    SAVE_LOCAL_CSV
+    SAVE_LOCAL_CSV,
+    SHEET_ID_LOCATIONS, WORKSHEET_LOCATIONS,
+    WORKSHEET_OUTPUT_REVIEW
 )
 from src.common.utils import ServiceUtils
 from src.pipelines.work_orders.odometer_processor import OdometerProcessor
@@ -46,6 +48,17 @@ def run_work_order_pipeline():
     asset_df = loader.load_gspread_data(SHEET_ID_ASSET_LIST, WORKSHEET_ASSET)
     mekanik_df = loader.load_gspread_data(SHEET_ID_MEKANIK, WORKSHEET_MEKANIK)
     
+    # Load master location data
+    location_df = None
+    if SHEET_ID_LOCATIONS and SHEET_ID_LOCATIONS != '<PLACEHOLDER_SHEET_ID>':
+        location_df = loader.load_gspread_data(SHEET_ID_LOCATIONS, WORKSHEET_LOCATIONS)
+        if not location_df.empty:
+            print(f"   ✅ Loaded {len(location_df)} locations from master data.")
+        else:
+            print("   ⚠️ Location master data empty. Will use fallback.")
+    else:
+        print("   ⚠️ Location master not configured. Will use fallback.")
+    
     if asset_df.empty:
         print("❌ CRITICAL: Asset List empty. Aborting.")
         return
@@ -68,12 +81,15 @@ def run_work_order_pipeline():
     s3 = loader.load_gspread_data(SHEET_ID_FORM_RESPONSES, WORKSHEET_FORM_RESPONSES)
     pipeline.ingest_generic(s3, 'S3_FORM_RESPONSES')
     
-    # S4 (With Filter)
+    # S4 (With Filter - only Completed status with valid Bengkel Tujuan)
     def s4_filter(df):
         if 'Status' in df.columns and 'Bengkel Tujuan' in df.columns:
+            # Filter: Status = Completed AND Bengkel Tujuan not null/empty
             return df[
                 df['Status'].astype(str).str.contains('Completed', case=False, na=False) &
-                df['Bengkel Tujuan'].notna()
+                df['Bengkel Tujuan'].notna() &
+                (df['Bengkel Tujuan'].astype(str).str.strip() != '') &
+                (df['Bengkel Tujuan'].astype(str).str.lower() != 'nan')
             ]
         return df
 
@@ -128,7 +144,7 @@ def run_work_order_pipeline():
         .fill_customer_names()
         .process_odometer()
         .standardize_mechanics(mekanik_df)
-        .standardize_location_names()
+        .standardize_location_names(location_df)
         .generate_snowflake_ids()
         .randomize_working_hours()
         .normalize_service_type()

@@ -114,6 +114,18 @@ SAVE_LOCAL_CSV = os.getenv("SAVE_LOCAL_CSV", "true").lower() == "true"
 # Complaint Cleaning Mode
 STRICT_COMPLAINT_CLEANING = os.getenv("STRICT_COMPLAINT_CLEANING", "false").lower() == "true"
 
+# Master Location Data
+SHEET_ID_LOCATIONS = os.getenv('SHEET_ID_LOCATIONS', '')
+WORKSHEET_LOCATIONS = os.getenv('WORKSHEET_LOCATIONS', 'service_locations')
+
+# Output Review 
+SHEET_ID_OUTPUT_REVIEW = os.getenv('SHEET_ID_OUTPUT_REVIEW', '')
+WORKSHEET_OUTPUT_REVIEW = os.getenv('WORKSHEET_OUTPUT_REVIEW', 'work_orders_v2')
+
+# Processing Mode
+LOCATION_FIX_MODE = os.getenv('LOCATION_FIX_MODE', 'hybrid')  # 'hybrid' or 'full'
+
+
 @dataclass
 class PipelineConfig:
     """Configuration for Odometer Cleaning Pipeline"""
