@@ -263,12 +263,27 @@ class ServiceItemsPipeline:
             self.df = pd.merge(self.df, bike_info, on='vehicle_license_plate', how='left')
         
         # 2. Merge Mapping Info (Price, SKU, Warranty Period, Product Name)
-        cols_to_merge = ['Rekomendasi Nama Part Baru', 'Product Name', 'Cost Price', 'Base Price', 'New SKU', 'ERP Product ID', 'Periode Garansi']
+        cols_to_merge = ['Rekomendasi Nama Part Baru', 'Product Name', 'Cost Price', 'Base Price', 'Landed Price', 'New SKU', 'ERP Product ID', 'Periode Garansi']
         available_cols = [c for c in cols_to_merge if c in self.mapping_df.columns]
         
         # Take unique mapping rows for these columns
         mapping_subset = self.mapping_df[available_cols].drop_duplicates(subset=['Rekomendasi Nama Part Baru'])
         self.df = pd.merge(self.df, mapping_subset, on='Rekomendasi Nama Part Baru', how='left')
+        
+        # Clean currency format from price columns (remove 'Rp', '.', ',' etc.)
+        def clean_currency(val):
+            if pd.isna(val) or val == '':
+                return 0
+            # Remove 'Rp', spaces, dots (thousand sep), keep comma for decimal or remove
+            cleaned = str(val).replace('Rp', '').replace(' ', '').replace('.', '').replace(',', '')
+            try:
+                return float(cleaned)
+            except:
+                return 0
+        
+        for price_col in ['Base Price', 'Cost Price', 'Landed Price']:
+            if price_col in self.df.columns:
+                self.df[price_col] = self.df[price_col].apply(clean_currency)
 
         # 3. Calculate Age (Bulan Ke)
         if 'Delivery - Outbone' in self.df.columns and 'created_at' in self.df.columns:
@@ -490,7 +505,8 @@ class ServiceItemsPipeline:
             'Product Name': 'Item Name',
             'New SKU': 'Sku',
             'ERP Product ID': 'Erp Product ID',
-            'Pergantian Ke': 'Pergantian Ke'
+            'Pergantian Ke': 'Pergantian Ke',
+            'Landed Price': 'Old Price'  # User requested: Landed Price -> Old Price
         }
         
         # Apply renaming for existing columns
@@ -525,7 +541,8 @@ class ServiceItemsPipeline:
             'service_type',
             'completed_by',
             'Pergantian Ke',
-            'Customer Type'  # Added per user request
+            'Customer Type',  # Added per user request
+            'Old Price'       # Added per user request (from Landed Price)
         ]
         
         # Select only columns that exist
