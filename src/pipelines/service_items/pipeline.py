@@ -431,19 +431,20 @@ class ServiceItemsPipeline:
             output_df['ERP Product ID'] = pd.to_numeric(output_df['ERP Product ID'], errors='coerce')
         
         # Calculate Qty
-        # For individual tracking (rekam medis per aset), each row = 1 item
-        # Exception: specific ERP Product IDs always Qty=2 (e.g., paired parts)
-        if 'ERP Product ID' in output_df.columns:
-            output_df['Qty'] = np.where(
-                output_df['ERP Product ID'].isin(DEFAULT_QTY_2_ERP_IDS),
-                2,
-                1  # Each record = 1 item for individual tracking
-            )
-        else:
-            output_df['Qty'] = 1
+        # Default: Qty = 1 for individual tracking (rekam medis per aset)
+        # Exception: Bearing 6201 always Qty = 2 (comes in pairs)
+        output_df['Qty'] = 1  # Default
         
-        # NO DEDUPLICATION - keep all individual records for vehicle medical record tracking
-        # Each part replacement is a separate record (FR and RR are 2 items)
+        if 'Rekomendasi Nama Part Baru' in output_df.columns:
+            output_df['Qty'] = np.where(
+                output_df['Rekomendasi Nama Part Baru'] == 'Bearing 6201',
+                2,
+                1
+            )
+        
+        # NO DEDUPLICATION / NO AGGREGATION
+        # Keep all individual records for vehicle medical record tracking
+        # Each part replacement is a separate record (FR and RR are 2 items, not grouped)
 
         
         # Ensure Base Price is numeric
@@ -455,35 +456,7 @@ class ServiceItemsPipeline:
         # Calculate Final Price (= Base Price, since we're not calculating INTERNAL_COVER)
         output_df['Final Price'] = output_df['Base Price']
         
-        # ---------------------------------------------------------
-        # AGGREGATION LOGIC (Requested by User)
-        # Group by Order + SKU + Warranty to aggregate Qty
-        # ---------------------------------------------------------
-        if 'New SKU' in output_df.columns:
-             # Fill NaN SKU to allow grouping (will restore later if needed, or leave as is)
-             output_df['New SKU'] = output_df['New SKU'].fillna('NO_SKU')
-             
-             # Grouping Keys
-             group_keys = ['order_id', 'New SKU', 'Warranty']
-             
-             # Define aggregation dict
-             # Qty: Sum
-             # Others: First (representative)
-             agg_dict = {'Qty': 'sum'}
-             
-             # Add all other columns to take 'first'
-             for col in output_df.columns:
-                 if col not in group_keys and col != 'Qty':
-                     agg_dict[col] = 'first'
-                     
-             # Perform GroupBy
-             # Note: This merges "Front Tire" and "Rear Tire" if they share the same SKU
-             output_df = output_df.groupby(group_keys, as_index=False).agg(agg_dict)
-             
-             # Restore NaN for NO_SKU (Optional, but 'NO_SKU' string is fine for output)
-             output_df['New SKU'] = output_df['New SKU'].replace('NO_SKU', np.nan)
-
-        # Recalculate Subtotal with new Aggregated Qty
+        # Calculate Subtotal Price (Base Price * Qty)
         output_df['Subtotal Price'] = output_df['Base Price'] * output_df['Qty']
         
         # Add static columns
