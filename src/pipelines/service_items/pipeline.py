@@ -409,9 +409,11 @@ class ServiceItemsPipeline:
         # Create a copy to avoid modifying original
         output_df = self.df.copy()
         
-        # Ensure ERP Product ID is numeric for comparison
+        # Ensure ERP Product ID remains as-is (null should stay null, not become 0)
+        # Do NOT convert to int or fillna(0) - keep original values
         if 'ERP Product ID' in output_df.columns:
-            output_df['ERP Product ID'] = pd.to_numeric(output_df['ERP Product ID'], errors='coerce').fillna(0).astype(int)
+            # Convert to numeric but keep NaN as NaN (will output as empty string later)
+            output_df['ERP Product ID'] = pd.to_numeric(output_df['ERP Product ID'], errors='coerce')
         
         # Calculate Qty
         # For individual tracking (rekam medis per aset), each row = 1 item
@@ -473,6 +475,12 @@ class ServiceItemsPipeline:
         output_df['Item Type'] = 'SPAREPART'
         output_df['Status'] = 'APPLIED'
         
+        # Add Customer Type from raw data
+        if 'customer_type' in output_df.columns:
+            output_df['Customer Type'] = output_df['customer_type']
+        else:
+            output_df['Customer Type'] = ''
+        
         # Rename columns for output
         column_mapping = {
             'order_id': 'Order Number',
@@ -516,7 +524,8 @@ class ServiceItemsPipeline:
             'bike_type',
             'service_type',
             'completed_by',
-            'Pergantian Ke'
+            'Pergantian Ke',
+            'Customer Type'  # Added per user request
         ]
         
         # Select only columns that exist
