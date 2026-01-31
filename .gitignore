@@ -11,6 +11,7 @@ tests/latest_validation_summary.txt
 docs/
 notebook/
 debug/
+.agent/
 
 # Python
 __pycache__/
