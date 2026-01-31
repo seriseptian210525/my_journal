@@ -4,10 +4,36 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+from src.services.part_usage_service import PartUsageService
 
 st.set_page_config(page_title="After Sales Analysis", page_icon="🛠️", layout="wide")
 
 st.title("🛠️ After Sales Analysis")
+
+# =============================================================================
+# DATA UPLOAD SECTION
+# =============================================================================
+with st.expander("📤 Upload New Data (CSV)", expanded=False):
+    st.info("Upload CSV files to append new part usage data. Duplicates based on `order_number` will be skipped.")
+    uploaded_file = st.file_uploader("Choose a CSV file", type=['csv'])
+    
+    if uploaded_file is not None:
+        try:
+            df_upload = pd.read_csv(uploaded_file)
+            st.dataframe(df_upload.head())
+            st.caption(f"Previewing first 5 rows of {len(df_upload)} total rows.")
+            
+            if st.button("Sync to Google Sheet", type="primary"):
+                with st.spinner("Syncing data to Google Sheets..."):
+                    try:
+                        service = PartUsageService()
+                        service.sync_to_gsheet(df_upload)
+                        st.success(f"✅ Successfully synced {len(df_upload)} rows!")
+                    except Exception as e:
+                        st.error(f"❌ Sync failed: {str(e)}")
+        except Exception as e:
+            st.error(f"Error reading file: {e}")
+
 st.markdown("""
 Dashboard ini menampilkan metrik **Asset Downtime** dan **Service Throughput** untuk membantu tim operasional memantau performa bengkel dan armada.
 """)
