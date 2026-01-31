@@ -184,7 +184,8 @@ def run_work_order_pipeline():
         'delivery_date_internal', 'odometer_raw', 'odometer_stage1', 
         'delta_days', 'delta_odo', 'km_per_day', 'is_anomaly_rule', 
         'needs_impute', 'odometer_clean', 
-        'customer_problems_details', 'customer_problems_clean'
+        'customer_problems_details', 'customer_problems_clean',
+        'location_is_null', 'location_resolve_status'  # Debug columns - exclude from main output
     ]
     
     business_df = final_df.drop(columns=[c for c in tech_columns if c in final_df.columns], errors='ignore').copy()
