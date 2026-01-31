@@ -126,12 +126,44 @@ class DataLoader:
                 safe_row = [make_json_safe(val) for val in row.values]
                 rows.append(safe_row)
             
-            data = [headers] + rows
-            
-            # Clear and update with USER_ENTERED option
+            # Clear existing content
             worksheet.clear()
-            worksheet.update('A1', data, value_input_option='USER_ENTERED')
-            print(f"✅ Successfully uploaded to {worksheet_name}.")
+            
+            # BATCH UPLOAD LOGIC - handle large datasets
+            BATCH_SIZE = 10000  # 10k rows per batch to avoid API timeout
+            total_rows = len(rows)
+            
+            if total_rows <= BATCH_SIZE:
+                # Small dataset - upload all at once
+                data = [headers] + rows
+                worksheet.update('A1', data, value_input_option='USER_ENTERED')
+            else:
+                # Large dataset - upload in batches
+                print(f"   📦 Large dataset detected. Uploading in batches of {BATCH_SIZE}...")
+                
+                # First batch includes headers
+                first_batch = [headers] + rows[:BATCH_SIZE]
+                worksheet.update('A1', first_batch, value_input_option='USER_ENTERED')
+                print(f"   ✅ Batch 1/{(total_rows // BATCH_SIZE) + 1} uploaded ({min(BATCH_SIZE, total_rows)} rows)")
+                
+                # Subsequent batches
+                batch_num = 2
+                for start_idx in range(BATCH_SIZE, total_rows, BATCH_SIZE):
+                    end_idx = min(start_idx + BATCH_SIZE, total_rows)
+                    batch_data = rows[start_idx:end_idx]
+                    
+                    # Calculate starting row (A1 is row 1, header is row 1, data starts row 2)
+                    start_row = start_idx + 2  # +1 for header, +1 for 1-indexing
+                    
+                    worksheet.update(f'A{start_row}', batch_data, value_input_option='USER_ENTERED')
+                    print(f"   ✅ Batch {batch_num}/{(total_rows // BATCH_SIZE) + 1} uploaded ({end_idx - start_idx} rows)")
+                    batch_num += 1
+                    
+                    # Small delay to avoid rate limiting
+                    import time
+                    time.sleep(1)
+            
+            print(f"✅ Successfully uploaded {total_rows} rows to {worksheet_name}.")
             
         except Exception as e:
             print(f"❌ Error uploading to {worksheet_name}: {e}")
