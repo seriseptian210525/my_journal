@@ -273,6 +273,17 @@ class DataLoader:
             new_rows = []
             skipped = 0
             
+            # IMPORTANT: Reorder DataFrame columns to match existing sheet headers
+            # This ensures data is written to correct columns
+            df_columns = df.columns.tolist()
+            missing_in_sheet = [col for col in df_columns if col not in existing_headers]
+            missing_in_df = [col for col in existing_headers if col not in df_columns]
+            
+            if missing_in_sheet:
+                print(f"   ⚠️ Columns in data but not in sheet (will be ignored): {missing_in_sheet}")
+            if missing_in_df:
+                print(f"   ⚠️ Columns in sheet but not in data (will be empty): {missing_in_df}")
+            
             for idx, row in df.iterrows():
                 # Build key from new row
                 key_parts = []
@@ -287,8 +298,15 @@ class DataLoader:
                     skipped += 1
                     continue
                 
-                # Convert row to JSON-safe list
-                safe_row = [make_json_safe(val) for val in row.values]
+                # Build row in SAME ORDER as existing sheet headers
+                safe_row = []
+                for header in existing_headers:
+                    if header in df.columns:
+                        val = row[header]
+                        safe_row.append(make_json_safe(val))
+                    else:
+                        safe_row.append(None)  # Column missing in new data
+                
                 new_rows.append(safe_row)
                 existing_keys.add(key_tuple)  # Prevent duplicates within batch
             
