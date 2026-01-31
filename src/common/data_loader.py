@@ -116,7 +116,7 @@ class DataLoader:
                 worksheet = sheet.worksheet(worksheet_name)
             except gspread.WorksheetNotFound:
                 print(f"⚠️ Worksheet '{worksheet_name}' not found. Creating it...")
-                worksheet = sheet.add_worksheet(title=worksheet_name, rows=len(df)+100, cols=len(df.columns))
+                worksheet = sheet.add_worksheet(title=worksheet_name, rows=len(df)+100, cols=len(df.columns)+5)
 
             # Build data with guaranteed JSON safety
             headers = [str(col) for col in df.columns.tolist()]
@@ -125,6 +125,18 @@ class DataLoader:
             for idx, row in df.iterrows():
                 safe_row = [make_json_safe(val) for val in row.values]
                 rows.append(safe_row)
+            
+            # RESIZE WORKSHEET if needed (avoid grid limit error)
+            required_rows = len(rows) + 10  # +10 buffer for header and safety
+            required_cols = len(headers) + 5  # +5 buffer
+            current_rows = worksheet.row_count
+            current_cols = worksheet.col_count
+            
+            if current_rows < required_rows or current_cols < required_cols:
+                new_rows = max(current_rows, required_rows)
+                new_cols = max(current_cols, required_cols)
+                print(f"   📐 Resizing worksheet from {current_rows}x{current_cols} to {new_rows}x{new_cols}...")
+                worksheet.resize(rows=new_rows, cols=new_cols)
             
             # Clear existing content
             worksheet.clear()
