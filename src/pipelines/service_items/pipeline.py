@@ -309,12 +309,20 @@ class ServiceItemsPipeline:
             bulan_ke = pd.Series([0] * len(self.df), index=self.df.index)
         year_cycle = (bulan_ke // 12).astype(int)
         
-        # 5. Calculate Pergantian Ke (per Plate + Part + Year Cycle)
+        # 5. Calculate Pergantian Ke (per Plate + SKU + Year Cycle)
+        # Use SKU instead of Part Name so Front/Rear get sequential numbers within same SKU
         self.df['_year_cycle'] = year_cycle
+        
+        # Create SKU key for grouping (use New SKU if available, fallback to Part Name)
+        if 'New SKU' in self.df.columns:
+            self.df['_sku_key'] = self.df['New SKU'].fillna(self.df['Rekomendasi Nama Part Baru'])
+        else:
+            self.df['_sku_key'] = self.df['Rekomendasi Nama Part Baru']
+        
         self.df['Pergantian Ke'] = self.df.groupby(
-            ['vehicle_license_plate', 'Rekomendasi Nama Part Baru', '_year_cycle']
+            ['vehicle_license_plate', '_sku_key', '_year_cycle']
         ).cumcount() + 1
-        self.df = self.df.drop(columns=['_year_cycle'])
+        self.df = self.df.drop(columns=['_year_cycle', '_sku_key'])
 
         # 6. Warranty Logic (Config-based from Mappings)
         print("   Calculating Warranty status with limits...")
