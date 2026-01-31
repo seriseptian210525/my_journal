@@ -526,8 +526,8 @@ class ServiceItemsPipeline:
         final_columns = [
             'Order Number',
             'Vehicle License Plate',
-            'Vehicle Vin',
-            'Vehicle Engine',
+            # 'Vehicle Vin',    # Removed per user request
+            # 'Vehicle Engine', # Removed per user request
             'Item Type',
             'Item Name',
             'Base Price',
