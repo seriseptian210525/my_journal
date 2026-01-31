@@ -262,8 +262,12 @@ class ServiceItemsPipeline:
 
             self.df = pd.merge(self.df, bike_info, on='vehicle_license_plate', how='left')
         
-        # 2. Merge Mapping Info (Price, SKU, Warranty Period, Product Name)
-        cols_to_merge = ['Rekomendasi Nama Part Baru', 'Product Name', 'Cost Price', 'Base Price', 'Landed Price', 'New SKU', 'ERP Product ID', 'Periode Garansi']
+        # 2. Merge Mapping Info (Price, SKU, Warranty Period, Product Name, Warranty Config)
+        cols_to_merge = [
+            'Rekomendasi Nama Part Baru', 'Product Name', 'Cost Price', 'Base Price', 
+            'Landed Price', 'New SKU', 'ERP Product ID', 'Periode Garansi',
+            'Warranty Type', 'Covered For', 'Limit Per Year'  # New warranty config columns
+        ]
         available_cols = [c for c in cols_to_merge if c in self.mapping_df.columns]
         
         # Take unique mapping rows for these columns
@@ -298,91 +302,93 @@ class ServiceItemsPipeline:
         if 'created_at' in self.df.columns:
             self.df = self.df.sort_values('created_at')
         
-        # NOTE: Pergantian Ke removed per user request - will be implemented separately
-
-        # 5. Warranty Logic (Categorical, Priority-based)
-        print("   Calculating Warranty status...")
-        
-        p_name = self.df['Rekomendasi Nama Part Baru']
-        
-        if 'Periode Garansi' in self.df.columns:
-             self.df['Periode Garansi'] = pd.to_numeric(self.df['Periode Garansi'], errors='coerce').fillna(0).astype(int)
-        
-        # Check customer type
-        if 'convert_customer_type' in self.df.columns:
-            is_electrum = self.df['convert_customer_type'].astype(str).str.upper() == 'ELECTRUM_USER'
-            is_partner = self.df['convert_customer_type'].astype(str).str.upper() == 'PARTNER_USER'
-        else:
-            is_electrum = pd.Series([False] * len(self.df), index=self.df.index)
-            is_partner = pd.Series([False] * len(self.df), index=self.df.index)
-        
-        # Calculate year-based reset for PARTNER_USER
-        # Reset "Pergantian Ke" every 12 months
+        # Calculate year-based cycle for reset
         if 'Bulan Ke' in self.df.columns:
             bulan_ke = self.df['Bulan Ke']
         else:
             bulan_ke = pd.Series([0] * len(self.df), index=self.df.index)
         year_cycle = (bulan_ke // 12).astype(int)
         
-        # Group by Plate + Part + Year Cycle -> Cumulative Count (Reset per year)
-        # Store year_cycle as a temp column for groupby
+        # 5. Calculate Pergantian Ke (per Plate + Part + Year Cycle)
         self.df['_year_cycle'] = year_cycle
-        self.df['Pergantian Ke Reset'] = self.df.groupby(
+        self.df['Pergantian Ke'] = self.df.groupby(
             ['vehicle_license_plate', 'Rekomendasi Nama Part Baru', '_year_cycle']
         ).cumcount() + 1
         self.df = self.df.drop(columns=['_year_cycle'])
+
+        # 6. Warranty Logic (Config-based from Mappings)
+        print("   Calculating Warranty status with limits...")
         
-        p_count_reset = self.df['Pergantian Ke Reset']
+        p_name = self.df['Rekomendasi Nama Part Baru']
+        p_count = self.df['Pergantian Ke']
         
-        # PACKAGE_SERVICE conditions:
-        # ELECTRUM_USER: Only Brake Pad (covered)
-        cond_package_electrum = (
-            is_electrum &
-            p_name.isin(['Rear Brake Pad', 'Front Brake Pad'])
-        )
+        # Get warranty config from Mappings
+        if 'Warranty Type' not in self.df.columns:
+            self.df['Warranty Type'] = 'WARRANTY'
+        if 'Covered For' not in self.df.columns:
+            self.df['Covered For'] = ''
+        if 'Limit Per Year' not in self.df.columns:
+            self.df['Limit Per Year'] = 0
         
-        # PARTNER_USER (Grab): Covered parts
-        # Tire, Brake Pad, Bearing 6201 - all covered without individual limit
-        # Limits will be applied separately via grouping
-        cond_package_partner = (
-            is_partner &
-            p_name.isin([
-                'Rear Tire KENDA', 'Front Tire KENDA',
-                'Rear Brake Pad', 'Front Brake Pad',
-                'Bearing 6201'
-            ])
-        )
+        # Convert Limit Per Year to numeric
+        self.df['Limit Per Year'] = pd.to_numeric(self.df['Limit Per Year'], errors='coerce').fillna(0).astype(int)
         
-        cond_package = cond_package_electrum | cond_package_partner
+        # Get customer type
+        if 'convert_customer_type' in self.df.columns:
+            customer_type = self.df['convert_customer_type'].astype(str).str.upper()
+        else:
+            customer_type = pd.Series([''], index=self.df.index)
         
-        # WARRANT: Month Age < Warranty Period
+        # Check if customer type is in Covered For list
+        def is_customer_covered(row):
+            covered_for = str(row.get('Covered For', '') or '').upper()
+            cust_type = str(row.get('convert_customer_type', '') or '').upper()
+            if not covered_for or not cust_type:
+                return False
+            return cust_type in covered_for
+        
+        self.df['_is_customer_covered'] = self.df.apply(is_customer_covered, axis=1)
+        
+        # Check if within limit
+        limit_per_year = self.df['Limit Per Year']
+        self.df['_within_limit'] = (limit_per_year == 0) | (p_count <= limit_per_year)
+        
+        # Final coverage: customer covered AND within limit
+        self.df['_is_package_covered'] = self.df['_is_customer_covered'] & self.df['_within_limit']
+        
+        # Month-based warranty check (fallback)
         if 'Bulan Ke' in self.df.columns:
             current_month = self.df['Bulan Ke']
         else:
             current_month = pd.Series([999] * len(self.df), index=self.df.index)
         
         if 'Periode Garansi' in self.df.columns:
+            self.df['Periode Garansi'] = pd.to_numeric(self.df['Periode Garansi'], errors='coerce').fillna(0).astype(int)
             warranty_period = self.df['Periode Garansi']
         else:
             warranty_period = pd.Series([0] * len(self.df), index=self.df.index)
+        
         cond_warranty = (current_month < warranty_period)
         
-        # INSURANCE: Body parts, frame, mirrors (Placeholder - can be extended)
-        insurance_parts = [
-            'Body Cover', 'Front Fender', 'Rear Fender', 'Side Cover',
-            'Rear Mirror', 'Plate Number Cover', 'Frame'
-        ]
-        cond_insurance = p_name.isin(insurance_parts)
+        # INSURANCE: Check from Warranty Type in Mappings
+        cond_insurance = self.df['Warranty Type'].astype(str).str.upper() == 'INSURANCE'
         
         # Apply priority-based logic
+        # Priority 1: PACKAGE_SERVICE (customer covered + within limit)
+        # Priority 2: WARRANTY (Warranty Type = WARRANTY and within period)
+        # Priority 3: INSURANCE (Warranty Type = INSURANCE)
+        # Default: NOT_COVERED
         conds = [
-            cond_package,    # Priority 1
-            cond_warranty,   # Priority 2
-            cond_insurance   # Priority 3
+            self.df['_is_package_covered'],  # Priority 1
+            (self.df['Warranty Type'].astype(str).str.upper() == 'WARRANTY') & cond_warranty,  # Priority 2
+            cond_insurance  # Priority 3
         ]
-        choices = ['PACKAGE_SERVICE', 'WARRANT', 'INSURANCE']
+        choices = ['PACKAGE_SERVICE', 'WARRANTY', 'INSURANCE']
         
         self.df['Warranty'] = np.select(conds, choices, default='NOT_COVERED')
+        
+        # Cleanup temp columns
+        self.df = self.df.drop(columns=['_is_customer_covered', '_within_limit', '_is_package_covered'], errors='ignore')
         
         # Status Coverage (Electrum covers PACKAGE_SERVICE and WARRANT)
         self.df['Status Coverage'] = np.where(
@@ -467,8 +473,16 @@ class ServiceItemsPipeline:
              # Grouping Keys
              group_keys = ['order_id', 'New SKU', 'Warranty']
              
+             # Convert Pergantian Ke to string for joining
+             if 'Pergantian Ke' in output_df.columns:
+                 output_df['Pergantian Ke'] = output_df['Pergantian Ke'].astype(str)
+             
              # Define aggregation dict
-             agg_dict = {'Qty': 'sum', 'Subtotal Price': 'sum'}
+             agg_dict = {
+                 'Qty': 'sum', 
+                 'Subtotal Price': 'sum',
+                 'Pergantian Ke': lambda x: ','.join(x.astype(str))  # Join as array
+             }
              
              # Add all other columns to take 'first'
              for col in output_df.columns:
@@ -534,8 +548,9 @@ class ServiceItemsPipeline:
             'bike_type',
             'service_type',
             'completed_by',
-            'Customer Type',  # Added per user request
-            'Old Price'       # Added per user request (from Landed Price)
+            'Pergantian Ke',   # Re-added as array string
+            'Customer Type',   # Added per user request
+            'Old Price'        # Added per user request (from Landed Price)
         ]
         
         # Select only columns that exist
