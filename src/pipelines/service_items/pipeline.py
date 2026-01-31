@@ -293,18 +293,17 @@ class ServiceItemsPipeline:
             # Clip negative values to 0? Or keep as is? Assuming >= 0.
             self.df['Bulan Ke'] = self.df['Bulan Ke'].apply(lambda x: max(0, x))
 
-        # 4. Calculate Sequence (Pergantian Ke-n)
+
+        # 4. Sort by created_at for proper ordering
         if 'created_at' in self.df.columns:
             self.df = self.df.sort_values('created_at')
         
-        # Group by Plate + Part Name -> Cumulative Count (Global)
-        self.df['Pergantian Ke'] = self.df.groupby(['vehicle_license_plate', 'Rekomendasi Nama Part Baru']).cumcount() + 1
+        # NOTE: Pergantian Ke removed per user request - will be implemented separately
 
         # 5. Warranty Logic (Categorical, Priority-based)
         print("   Calculating Warranty status...")
         
         p_name = self.df['Rekomendasi Nama Part Baru']
-        p_count = self.df['Pergantian Ke']
         
         if 'Periode Garansi' in self.df.columns:
              self.df['Periode Garansi'] = pd.to_numeric(self.df['Periode Garansi'], errors='coerce').fillna(0).astype(int)
@@ -336,24 +335,22 @@ class ServiceItemsPipeline:
         p_count_reset = self.df['Pergantian Ke Reset']
         
         # PACKAGE_SERVICE conditions:
-        # ELECTRUM_USER: Only Brake Pad (1-6), NO yearly reset
+        # ELECTRUM_USER: Only Brake Pad (covered)
         cond_package_electrum = (
             is_electrum &
-            p_name.isin(['Rear Brake Pad', 'Front Brake Pad']) &
-            p_count.isin(range(1, 7))
+            p_name.isin(['Rear Brake Pad', 'Front Brake Pad'])
         )
         
-        # PARTNER_USER (Grab): 
-        # Tire: 4 pcs (2 sets) -> 1, 2, 3, 4
-        # Brake Pad: 8 pcs (4 sets) -> 1 to 8
-        # Bearing 6201 (Front): 4 pcs (2 sets) -> 1, 2, 3, 4
+        # PARTNER_USER (Grab): Covered parts
+        # Tire, Brake Pad, Bearing 6201 - all covered without individual limit
+        # Limits will be applied separately via grouping
         cond_package_partner = (
             is_partner &
-            (
-                (p_name.isin(['Rear Tire KENDA', 'Front Tire KENDA']) & p_count_reset.isin(range(1, 5))) |
-                (p_name.isin(['Rear Brake Pad', 'Front Brake Pad']) & p_count_reset.isin(range(1, 9))) |
-                (p_name.isin(['Bearing 6201']) & p_count_reset.isin(range(1, 5)))
-            )
+            p_name.isin([
+                'Rear Tire KENDA', 'Front Tire KENDA',
+                'Rear Brake Pad', 'Front Brake Pad',
+                'Bearing 6201'
+            ])
         )
         
         cond_package = cond_package_electrum | cond_package_partner
@@ -459,6 +456,31 @@ class ServiceItemsPipeline:
         # Calculate Subtotal Price (Base Price * Qty)
         output_df['Subtotal Price'] = output_df['Base Price'] * output_df['Qty']
         
+        # ---------------------------------------------------------
+        # SKU GROUPING for output optimization
+        # Group by Order + SKU + Warranty to aggregate Qty
+        # ---------------------------------------------------------
+        if 'New SKU' in output_df.columns:
+             # Fill NaN SKU to allow grouping
+             output_df['New SKU'] = output_df['New SKU'].fillna('NO_SKU')
+             
+             # Grouping Keys
+             group_keys = ['order_id', 'New SKU', 'Warranty']
+             
+             # Define aggregation dict
+             agg_dict = {'Qty': 'sum', 'Subtotal Price': 'sum'}
+             
+             # Add all other columns to take 'first'
+             for col in output_df.columns:
+                 if col not in group_keys and col not in agg_dict:
+                     agg_dict[col] = 'first'
+                     
+             # Perform GroupBy
+             output_df = output_df.groupby(group_keys, as_index=False).agg(agg_dict)
+             
+             # Restore NaN for NO_SKU
+             output_df['New SKU'] = output_df['New SKU'].replace('NO_SKU', np.nan)
+        
         # Add static columns
         output_df['Item Type'] = 'SPAREPART'
         output_df['Status'] = 'APPLIED'
@@ -478,7 +500,6 @@ class ServiceItemsPipeline:
             'Product Name': 'Item Name',
             'New SKU': 'Sku',
             'ERP Product ID': 'Erp Product ID',
-            'Pergantian Ke': 'Pergantian Ke',
             'Landed Price': 'Old Price'  # User requested: Landed Price -> Old Price
         }
         
@@ -513,7 +534,6 @@ class ServiceItemsPipeline:
             'bike_type',
             'service_type',
             'completed_by',
-            'Pergantian Ke',
             'Customer Type',  # Added per user request
             'Old Price'       # Added per user request (from Landed Price)
         ]
