@@ -127,7 +127,20 @@ WORKSHEET_PART_USAGE = os.getenv('WORKSHEET_PART_USAGE', 'part_usage')
 LOCATION_FIX_MODE = os.getenv('LOCATION_FIX_MODE', 'hybrid')  # 'hybrid' or 'full'
 
 # --- Neon Database Config ---
-NEON_DB_CONNECTION_STRING = os.getenv('NEON_DB_CONNECTION_STRING')
+def _get_neon_connection_string():
+    """Get Neon connection string - supports both Streamlit Cloud and local."""
+    # Try st.secrets first (Streamlit Cloud)
+    try:
+        import streamlit as st
+        if hasattr(st, 'secrets') and 'neon' in st.secrets:
+            return st.secrets['neon']['connection_string']
+    except:
+        pass
+    
+    # Fallback to environment variable (local development)
+    return os.getenv('NEON_DB_CONNECTION_STRING')
+
+NEON_DB_CONNECTION_STRING = _get_neon_connection_string()
 
 
 @dataclass

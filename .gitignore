@@ -3,6 +3,7 @@
 .env.example
 env.yaml
 credentials/
+.streamlit/secrets.toml
 
 # Output Data (Local Testing Only)
 output/*.csv
