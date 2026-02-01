@@ -1,14 +1,29 @@
-pandas
-gspread
-oauth2client
-python-dotenv
-snowflake-id
-rapidfuzz
-PyYAML
-fuzzywuzzy
-python-Levenshtein
-tqdm
-psycopg2-binary
-sqlalchemy
-streamlit
-plotly
+# Core Dependencies
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Google Sheets
+gspread>=5.10.0
+oauth2client>=4.1.3
+
+# Configuration
+python-dotenv>=1.0.0
+PyYAML>=6.0.1
+
+# Database
+psycopg2-binary>=2.9.9
+sqlalchemy>=2.0.0
+
+# Fuzzy Matching
+rapidfuzz>=3.0.0
+fuzzywuzzy>=0.18.0
+python-Levenshtein>=0.21.0
+
+# Utilities
+snowflake-id>=1.0.0
+tqdm>=4.65.0
+
+# Streamlit & Visualization (PINNED for compatibility)
+streamlit>=1.32.0,<2.0.0
+altair>=5.0.0,<6.0.0
+plotly>=5.18.0
