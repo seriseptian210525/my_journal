@@ -36,7 +36,14 @@ class NeonSyncService:
     
     def __init__(self):
         self.loader = NeonLoader()
-        self.data_loader = DataLoader()
+        self._data_loader = None  # Lazy load - only needed for sync
+    
+    @property
+    def data_loader(self):
+        """Lazy load DataLoader only when needed (requires Google credentials)."""
+        if self._data_loader is None:
+            self._data_loader = DataLoader()
+        return self._data_loader
     
     def get_max_pergantian_ke(self) -> pd.DataFrame:
         """
