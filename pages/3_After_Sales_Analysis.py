@@ -336,4 +336,7 @@ with chart_tab2:
 # FOOTER
 # =============================================================================
 st.markdown("---")
-st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Data Source: Neon PostgreSQL | Total Records: {total_count if NEON_AVAILABLE else 'N/A':,}")
+# Safe check for total_count
+record_count = total_count if 'total_count' in dir() and NEON_AVAILABLE else 'N/A'
+st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Data Source: Neon PostgreSQL | Total Records: {record_count:,}" if isinstance(record_count, int) else f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Data Source: Neon PostgreSQL | Total Records: {record_count}")
+
