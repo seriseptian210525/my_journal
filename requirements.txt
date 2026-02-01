@@ -8,3 +8,7 @@ PyYAML
 fuzzywuzzy
 python-Levenshtein
 tqdm
+psycopg2-binary
+sqlalchemy
+streamlit
+plotly

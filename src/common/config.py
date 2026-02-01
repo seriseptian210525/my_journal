@@ -121,10 +121,13 @@ WORKSHEET_LOCATIONS = os.getenv('WORKSHEET_LOCATIONS', 'service_locations')
 # Output Review 
 SHEET_ID_OUTPUT_REVIEW = os.getenv('SHEET_ID_OUTPUT_REVIEW', '')
 WORKSHEET_OUTPUT_REVIEW = os.getenv('WORKSHEET_OUTPUT_REVIEW', 'work_orders_v2')
-WORKSHEET_PART_USAGE = os.getenv('WORKSHEET_PART_USAGE', 'work_orders_v2')
+WORKSHEET_PART_USAGE = os.getenv('WORKSHEET_PART_USAGE', 'part_usage')
 
 # Processing Mode
 LOCATION_FIX_MODE = os.getenv('LOCATION_FIX_MODE', 'hybrid')  # 'hybrid' or 'full'
+
+# --- Neon Database Config ---
+NEON_DB_CONNECTION_STRING = os.getenv('NEON_DB_CONNECTION_STRING')
 
 
 @dataclass
