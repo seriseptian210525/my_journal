@@ -109,6 +109,8 @@ if 'filter_warranty' not in st.session_state:
     st.session_state.filter_warranty = "All"
 if 'filter_sku' not in st.session_state:
     st.session_state.filter_sku = "All"
+if 'filter_loc_cat' not in st.session_state:
+    st.session_state.filter_loc_cat = "All"
 if 'current_page' not in st.session_state:
     st.session_state.current_page = 1
 
@@ -129,7 +131,7 @@ if NEON_AVAILABLE:
 
 # --- Date Filter Section ---
 st.markdown("##### 📅 Date Filter")
-col_date_mode, col_date_input = st.columns([1, 3])
+col_date_mode, col_date_input, col_loc_cat = st.columns([1, 2, 1])
 
 with col_date_mode:
     date_mode_options = ["All Time", "Specific Date", "Date Range", "Month & Year"]
@@ -140,6 +142,12 @@ with col_date_mode:
         index=current_mode_idx,
         key="input_date_mode"
     )
+
+with col_loc_cat:
+    loc_cats = ["All", "B2B Repair", "Internal Repair"]
+    current_loc = st.session_state.filter_loc_cat
+    idx = loc_cats.index(current_loc) if current_loc in loc_cats else 0
+    input_loc_cat = st.selectbox("🏭 Tipe Lokasi", loc_cats, index=idx, key="input_loc_cat")
 
 start_date_input = None
 end_date_input = None
@@ -222,6 +230,7 @@ if apply_filter:
     st.session_state.filter_customer = filter_customer
     st.session_state.filter_warranty = filter_warranty
     st.session_state.filter_sku = filter_sku
+    st.session_state.filter_loc_cat = input_loc_cat
     
     # Save Date State
     st.session_state.filter_date_mode = date_mode
@@ -240,6 +249,7 @@ with col_clear:
         st.session_state.filter_customer = "All"
         st.session_state.filter_warranty = "All"
         st.session_state.filter_sku = "All"
+        st.session_state.filter_loc_cat = "All"
         
         # Reset Date
         st.session_state.filter_date_mode = "All Time"
@@ -261,6 +271,8 @@ if st.session_state.filter_warranty != "All":
     filters['warranty_coverage'] = st.session_state.filter_warranty
 if st.session_state.filter_sku != "All":
     filters['sku'] = st.session_state.filter_sku
+if st.session_state.filter_loc_cat != "All":
+    filters['location_category'] = st.session_state.filter_loc_cat
 
 # Add Date Filters
 if st.session_state.filter_date_mode != "All Time":

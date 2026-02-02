@@ -280,6 +280,14 @@ class NeonSyncService:
             if filters.get('end_date'):
                 where_clauses.append("created_at <= :end_date")
                 params['end_date'] = filters['end_date']
+            
+            # Location Category Filter (Derived from service_location_name)
+            if filters.get('location_category'):
+                cat = filters['location_category']
+                if cat == 'B2B Repair':
+                    where_clauses.append("service_location_name ILIKE '%GRAB%'")
+                elif cat == 'Internal Repair':
+                    where_clauses.append("(service_location_name NOT ILIKE '%GRAB%' OR service_location_name IS NULL)")
         
         where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
         
