@@ -254,8 +254,8 @@ def standardize_service_items(df, asset_df=pd.DataFrame(), mapping_df=pd.DataFra
     out['odometer'] = clean_numeric_vectorized(out['odometer']).astype(int)
     
     out['order_number'] = 'BF-' + out['Order Number'].astype(str).str.slice(0, 97)  # BF- prefix for service_items
-    out['vehicle_plate'] = out['Vehicle License Plate'].astype(str).str.slice(0, 50)
-    out['sku'] = out['Sku'].astype(str).str.slice(0, 100)
+    out['vehicle_plate'] = out['Vehicle License Plate'].astype(str).str.strip().str.upper().str.slice(0, 50)
+    out['sku'] = out['Sku'].astype(str).str.strip().str.upper().str.slice(0, 100)
     out['item_name'] = out['Item Name'].astype(str).str.slice(0, 255)
     out['erp_product_id'] = out['Erp Product ID'].astype(str).str.slice(0, 100)
     
@@ -346,8 +346,8 @@ def standardize_part_usage(df, asset_df=pd.DataFrame(), mapping_df=pd.DataFrame(
     
     out['odometer'] = clean_numeric_vectorized(out['odometer']).astype(int)
 
-    out['vehicle_plate'] = out['vehicle_license_plate'].astype(str).str.slice(0, 50)
-    out['sku'] = out['sku'].astype(str).str.slice(0, 100)
+    out['vehicle_plate'] = out['vehicle_license_plate'].astype(str).str.strip().str.upper().str.slice(0, 50)
+    out['sku'] = out['sku'].astype(str).str.strip().str.upper().str.slice(0, 100)
     out['order_number'] = out['order_number'].astype(str).str.slice(0, 100)
     
     out['item_name'] = out['item_name'].astype(str).str.slice(0, 255)
