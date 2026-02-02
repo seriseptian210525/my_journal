@@ -78,13 +78,35 @@ def preview_pipeline(export_csv=True, sample_size=None):
     # --- DEDUPLICATION BEFORE EXPLODE ---
     # Remove cross-source duplicates while preserving qty-based rows
     print("\n🔄 Deduplicating cross-source duplicates (BEFORE explode)...")
-    unified_df['created_at'] = pd.to_datetime(unified_df['created_at'])
-    unified_df['created_date'] = unified_df['created_at'].dt.date
-    key_cols = ['vehicle_plate', 'sku', 'created_date', 'service_location_name']
+    
+    # Strict normalization for dedup keys
+    unified_df['dedup_plate'] = unified_df['vehicle_plate'].astype(str).str.strip().str.upper()
+    unified_df['dedup_sku'] = unified_df['sku'].astype(str).str.strip().str.upper()
+    unified_df['dedup_loc'] = unified_df['service_location_name'].astype(str).str.strip().str.upper()
+    unified_df['dedup_date'] = pd.to_datetime(unified_df['created_at']).dt.date.astype(str)
+    
+    key_cols = ['dedup_plate', 'dedup_sku', 'dedup_date', 'dedup_loc']
+    
+    # DEBUG: Trace specific order
+    debug_order = 'BF-WO-235090059722887168'
+    debug_mask = unified_df['order_number'] == debug_order
+    
+    with open('debug/output/dedup_trace.txt', 'w') as f:
+        f.write(f"DEBUG TRACE for {debug_order}\n")
+        if debug_mask.any():
+            d_rows = unified_df[debug_mask]
+            f.write(f"Rows BEFORE dedup: {len(d_rows)}\n")
+            f.write(d_rows[['vehicle_plate', 'sku', 'quantity', 'created_at', 'dedup_plate', 'dedup_sku', 'dedup_date', 'dedup_loc']].to_string())
+            f.write("\n")
+        else:
+            f.write("Order not found before dedup.\n")
+    
     before_dedup = len(unified_df)
     unified_df = unified_df.drop_duplicates(subset=key_cols, keep='first')
     after_dedup = len(unified_df)
-    unified_df = unified_df.drop(columns=['created_date'], errors='ignore')
+    
+    # Cleanup temp columns
+    unified_df = unified_df.drop(columns=['dedup_plate', 'dedup_sku', 'dedup_loc', 'dedup_date', 'created_date'], errors='ignore')
     print(f"   Deduplicated: {before_dedup} → {after_dedup} (removed {before_dedup - after_dedup})")
     
     # Explode AFTER dedup
