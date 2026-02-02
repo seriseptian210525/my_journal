@@ -15,11 +15,32 @@ class DataLoader:
     def _connect(self):
         """Authenticates with Google Sheets API."""
         try:
+            # 1. Try Streamlit Secrets (Cloud)
+            try:
+                import streamlit as st
+                if hasattr(st, "secrets") and "gcp_service_account" in st.secrets:
+                    # gspread expects specific keys, ensure st.secrets dict is compatible
+                    # st.secrets returns a purely string-based dict which is what we need
+                    creds_dict = dict(st.secrets["gcp_service_account"])
+                    
+                    # Fix private_key if it contains escaped newlines (common issue in TOML/Streamlit secrets)
+                    if "private_key" in creds_dict:
+                         creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+
+                    self.client = gspread.service_account_from_dict(creds_dict)
+                    print("✅ Connected to Google Sheets via Streamlit Secrets.")
+                    return
+            except ImportError:
+                pass # Streamlit not installed or not running in streamlit context
+            except Exception as e:
+                print(f"⚠️ Failed to connect via Streamlit Secrets: {e}")
+
+            # 2. Fallback to File (Local / Env)
             if not self.service_account_file or not os.path.exists(self.service_account_file):
                 raise FileNotFoundError(f"Service account file not found: {self.service_account_file}")
             
             self.client = gspread.service_account(filename=str(self.service_account_file))
-            print("✅ Connected to Google Sheets.")
+            print("✅ Connected to Google Sheets via File.")
         except Exception as e:
             print(f"❌ Connection Failed: {e}")
             raise e
