@@ -203,16 +203,24 @@ def calculate_warranty_coverage(df, asset_df=None, mapping_df=None, skip_sequenc
         types_list = [t.strip() for t in warranty_types.split(',') if t.strip()]
         
         # Priority-based check
+        # Priority-based check
         if 'PACKAGE_SERVICE' in types_list:
             if is_customer_covered and within_limit:
                 return 'PACKAGE_SERVICE'
         
-        if 'WARRANTY' in types_list:
-            if is_customer_covered and within_warranty_period:
+        # 2. WARRANTY: check for "WARRANT" (matches WARRANT and WARRANTY)
+        # customer covered + bulan_ke < periode_garansi
+        # If covered_for is empty, assume covered for ALL (if warranty type is present)
+        # Relaxed check: match substring 'WARRANT'
+        if any('WARRANT' in t for t in types_list):
+            customer_ok = is_customer_covered or (not covered_for)
+            if customer_ok and within_warranty_period:
                 return 'WARRANTY'
         
+        # 3. INSURANCE: Always covered if customer type matches
         if 'INSURANCE' in types_list:
-            if is_customer_covered:
+            customer_ok = is_customer_covered or (not covered_for)
+            if customer_ok:
                 return 'INSURANCE'
         
         return 'NOT_COVERED'
