@@ -293,7 +293,7 @@ class NeonSyncService:
             quantity, final_price, 
             subtotal_price, old_price, 
             warranty_coverage as warranty_status, -- Display coverage as warranty status
-            pergantian_ke, odometer
+            pergantian_ke_total, pergantian_ke_yearly, odometer
         FROM unified_part_logs 
         WHERE {where_sql}
         ORDER BY created_at DESC
