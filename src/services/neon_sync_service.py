@@ -133,6 +133,9 @@ class NeonSyncService:
                 stats['status'] = 'no_new_data'
                 return stats
             
+            # Create unified_df by merging Service Items and Part Usage
+            unified_df = pd.concat([si_df, pu_df], ignore_index=True)
+
             # --- DEDUPLICATION (CROSS-SOURCE) BEFORE EXPLODE ---
             # Remove duplicates from Apps vs Manual Sheet while preserving qty-based rows
             # --- DEDUPLICATION LOGIC ---
