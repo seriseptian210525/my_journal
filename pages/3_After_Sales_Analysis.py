@@ -240,7 +240,7 @@ if NEON_AVAILABLE:
                     
                     # NEW COLUMNS
                     "subtotal_price": st.column_config.NumberColumn("Subtotal", format="Rp %.0f"),
-                    "old_price": st.column_config.NumberColumn("Wait", format="Rp %.0f"), # User asked for New Column "Wait" (Old Price) or similar? Code says "Wait" -> "Old Price"
+                    "old_price": st.column_config.NumberColumn("Old Price", format="Rp %.0f"), # User asked for New Column "Wait" (Old Price) or similar? Code says "Wait" -> "Old Price"
                     
                     "final_price": st.column_config.NumberColumn("Price", format="Rp %.0f"),
                     "warranty_status": st.column_config.TextColumn("Warranty Coverage"), # Renamed header
