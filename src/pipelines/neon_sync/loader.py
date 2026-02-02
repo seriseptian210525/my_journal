@@ -20,8 +20,11 @@ class NeonLoader:
             return result
 
     def get_max_created_at(self, table_name: str = "unified_part_logs"):
-        """Get the latest ingested timestamp for incremental loading."""
-        query = f"SELECT MAX(created_at) FROM {table_name}"
+        """
+        Get the latest ingested timestamp for incremental loading.
+        Ignores rows with empty customer_type to allow recovery from failed enrichment.
+        """
+        query = f"SELECT MAX(created_at) FROM {table_name} WHERE customer_type IS NOT NULL AND customer_type != ''"
         with self.engine.connect() as conn:
             result = conn.execute(text(query)).scalar()
         return result
