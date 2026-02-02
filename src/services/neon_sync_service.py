@@ -235,6 +235,10 @@ class NeonSyncService:
             if filters.get('warranty_coverage') and filters['warranty_coverage'] != 'All':
                 where_clauses.append("warranty_coverage = :warranty")
                 params['warranty'] = filters['warranty_coverage']
+            
+            if filters.get('sku') and filters['sku'] != 'All':
+                where_clauses.append("sku = :sku")
+                params['sku'] = filters['sku']
                 
             # Date Range Filters
             if filters.get('start_date'):
@@ -293,10 +297,14 @@ class NeonSyncService:
             warranty_query = "SELECT DISTINCT warranty_coverage FROM unified_part_logs WHERE warranty_coverage IS NOT NULL ORDER BY warranty_coverage"
             options['warranty_coverage'] = self.loader.fetch_df(warranty_query)['warranty_coverage'].tolist()
             
+            # 5. SKU
+            sku_query = "SELECT DISTINCT sku FROM unified_part_logs WHERE sku IS NOT NULL ORDER BY sku"
+            options['sku'] = self.loader.fetch_df(sku_query)['sku'].tolist()
+            
         except Exception as e:
             print(f"⚠️ Error loading filter options: {e}")
             # Return empty lists on error
-            options = {k: [] for k in ['vehicle_plate', 'item_name', 'customer_type', 'warranty_coverage']}
+            options = {k: [] for k in ['vehicle_plate', 'item_name', 'customer_type', 'warranty_coverage', 'sku']}
             
         return options
     

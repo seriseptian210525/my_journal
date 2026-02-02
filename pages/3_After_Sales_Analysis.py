@@ -107,6 +107,8 @@ if 'filter_customer' not in st.session_state:
     st.session_state.filter_customer = "All"
 if 'filter_warranty' not in st.session_state:
     st.session_state.filter_warranty = "All"
+if 'filter_sku' not in st.session_state:
+    st.session_state.filter_sku = "All"
 if 'current_page' not in st.session_state:
     st.session_state.current_page = 1
 
@@ -115,7 +117,8 @@ filter_options = {
     'vehicle_plate': [],
     'item_name': [],
     'customer_type': [],
-    'warranty_coverage': []
+    'warranty_coverage': [],
+    'sku': []
 }
 
 if NEON_AVAILABLE:
@@ -179,7 +182,7 @@ with col_date_input:
 
 # Filter inputs
 st.markdown("##### 🏷️ Category Filters")
-filter_col1, filter_col2, filter_col3, filter_col4, filter_col5 = st.columns([1.5, 1.5, 1.5, 1, 0.8])
+filter_col1, filter_col2, filter_col3, filter_col4, filter_col5, filter_col6 = st.columns([1.5, 1.5, 1.5, 1.2, 1, 0.8])
 
 with filter_col1:
     plate_opts = ["All"] + filter_options.get('vehicle_plate', [])
@@ -204,6 +207,11 @@ with filter_col4:
     filter_warranty = st.selectbox("🛡️ Warranty", warranty_opts, index=idx, key="input_warranty")
 
 with filter_col5:
+    sku_opts = ["All"] + filter_options.get('sku', [])
+    idx = sku_opts.index(st.session_state.filter_sku) if st.session_state.filter_sku in sku_opts else 0
+    filter_sku = st.selectbox("🏷️ SKU", sku_opts, index=idx, key="input_sku")
+
+with filter_col6:
     st.markdown("<br>", unsafe_allow_html=True)
     apply_filter = st.button("🔍 Apply", type="primary", use_container_width=True)
 
@@ -213,6 +221,7 @@ if apply_filter:
     st.session_state.filter_item = filter_item
     st.session_state.filter_customer = filter_customer
     st.session_state.filter_warranty = filter_warranty
+    st.session_state.filter_sku = filter_sku
     
     # Save Date State
     st.session_state.filter_date_mode = date_mode
@@ -230,6 +239,7 @@ with col_clear:
         st.session_state.filter_item = "All"
         st.session_state.filter_customer = "All"
         st.session_state.filter_warranty = "All"
+        st.session_state.filter_sku = "All"
         
         # Reset Date
         st.session_state.filter_date_mode = "All Time"
@@ -249,6 +259,8 @@ if st.session_state.filter_customer != "All":
     filters['customer_type'] = st.session_state.filter_customer
 if st.session_state.filter_warranty != "All":
     filters['warranty_coverage'] = st.session_state.filter_warranty
+if st.session_state.filter_sku != "All":
+    filters['sku'] = st.session_state.filter_sku
 
 # Add Date Filters
 if st.session_state.filter_date_mode != "All Time":
