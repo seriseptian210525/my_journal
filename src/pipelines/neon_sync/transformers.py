@@ -59,20 +59,12 @@ def calculate_pergantian_ke(df):
     return df
 
 
-def calculate_warranty_coverage(df, asset_df=None, mapping_df=None):
+def calculate_warranty_coverage(df, asset_df=None, mapping_df=None, skip_sequence_calc=False):
     """
     Calculate customer_category, bulan_ke, year_cycle, pergantian_ke (with reset), and warranty_coverage.
     
-    This function should be called AFTER concat/standardization of service_items and part_usage.
-    
-    Steps:
-    1. Join delivery_date from Asset List
-    2. Map customer_category: GEL → PARTNER_USER, else → ELECTRUM_USER
-    3. Calculate bulan_ke: (created_at - delivery_date) / 30.44
-    4. Calculate year_cycle: bulan_ke // 12
-    5. Join warranty config from Mappings (Warranty Type, Covered For, Limit Per Year)
-    6. Calculate pergantian_ke: cumcount per (vehicle_plate, sku, year_cycle)
-    7. Calculate warranty_coverage: Check covered_for + limit_per_year
+    Args:
+        skip_sequence_calc (bool): If True, skips pergantian_ke calculation (useful for incremental sync with custom offset).
     """
     if df.empty:
         return df
@@ -156,7 +148,7 @@ def calculate_warranty_coverage(df, asset_df=None, mapping_df=None):
             if 'Limit Per Year' in mapping_clean.columns:
                 mapping_clean['_limit_per_year'] = pd.to_numeric(mapping_clean['Limit Per Year'], errors='coerce').fillna(0).astype(int)
                 warranty_cols.append('_limit_per_year')
-            # NEW: Periode Garansi (warranty period in months)
+            # NEW: Periode Garansi
             if 'Periode Garansi' in mapping_clean.columns:
                 mapping_clean['_periode_garansi'] = pd.to_numeric(mapping_clean['Periode Garansi'], errors='coerce').fillna(0).astype(int)
                 warranty_cols.append('_periode_garansi')
@@ -180,19 +172,15 @@ def calculate_warranty_coverage(df, asset_df=None, mapping_df=None):
             # Cleanup
             out = out.drop(columns=['join_sku', '_warranty_type', '_covered_for', '_limit_per_year', '_periode_garansi'], errors='ignore')
     
-    # --- Step 6: Calculate Pergantian Ke with Yearly Reset ---
-    out = out.sort_values(['vehicle_plate', 'sku', 'created_at']).reset_index(drop=True)
-    out['pergantian_ke'] = out.groupby(['vehicle_plate', 'sku', 'year_cycle']).cumcount() + 1
+    # --- Step 6: Calculate Pergantian Ke (Conditionally Skipped) ---
+    if not skip_sequence_calc:
+        out = out.sort_values(['vehicle_plate', 'sku', 'created_at']).reset_index(drop=True)
+        out['pergantian_ke'] = out.groupby(['vehicle_plate', 'sku', 'year_cycle']).cumcount() + 1
     
     # --- Step 7: Calculate Warranty Coverage ---
     def check_warranty_coverage(row):
         """
-        Determine warranty coverage with priority:
-        1. PACKAGE_SERVICE: customer covered + pergantian_ke <= limit_per_year
-        2. WARRANTY: customer covered + bulan_ke < periode_garansi
-        3. INSURANCE: part type is insurance (always covered for customer)
-        
-        Warranty Type can have multiple values like "INSURANCE, WARRANTY"
+        Determine warranty coverage with priority.
         """
         covered_for = str(row.get('covered_for', '') or '').upper()
         cust_cat = str(row.get('customer_category', '') or '').upper()
@@ -211,21 +199,18 @@ def calculate_warranty_coverage(df, asset_df=None, mapping_df=None):
         # Check if within warranty period
         within_warranty_period = (periode_garansi > 0) and (bulan_ke < periode_garansi)
         
-        # Parse multiple warranty types (e.g., "INSURANCE, WARRANTY")
+        # Parse multiple warranty types
         types_list = [t.strip() for t in warranty_types.split(',') if t.strip()]
         
-        # Priority-based check:
-        # 1. PACKAGE_SERVICE: customer covered + within limit
+        # Priority-based check
         if 'PACKAGE_SERVICE' in types_list:
             if is_customer_covered and within_limit:
                 return 'PACKAGE_SERVICE'
         
-        # 2. WARRANTY: customer covered + bulan_ke < periode_garansi
         if 'WARRANTY' in types_list:
             if is_customer_covered and within_warranty_period:
                 return 'WARRANTY'
         
-        # 3. INSURANCE: Always covered if customer type matches (no period check)
         if 'INSURANCE' in types_list:
             if is_customer_covered:
                 return 'INSURANCE'
@@ -234,8 +219,9 @@ def calculate_warranty_coverage(df, asset_df=None, mapping_df=None):
     
     out['warranty_coverage'] = out.apply(check_warranty_coverage, axis=1)
     
-    print(f"   ✅ Warranty coverage calculated. Distribution:")
-    print(out['warranty_coverage'].value_counts().to_string())
+    if not skip_sequence_calc:
+        print(f"   ✅ Warranty coverage calculated. Distribution:")
+        print(out['warranty_coverage'].value_counts().to_string())
     
     return out
 

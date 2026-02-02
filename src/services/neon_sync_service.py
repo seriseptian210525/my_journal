@@ -17,7 +17,8 @@ from src.pipelines.neon_sync.loader import NeonLoader
 from src.pipelines.neon_sync.transformers import (
     standardize_service_items,
     standardize_part_usage,
-    explode_rows
+    explode_rows,
+    calculate_warranty_coverage
 )
 from src.common.data_loader import DataLoader
 from src.common.config import (
@@ -47,13 +48,13 @@ class NeonSyncService:
     
     def get_max_pergantian_ke(self) -> pd.DataFrame:
         """
-        Get MAX pergantian_ke per (vehicle_plate, sku) from Neon.
+        Get MAX pergantian_ke per (vehicle_plate, sku, year_cycle) from Neon.
         Used for offset calculation in incremental mode.
         """
         query = """
-        SELECT vehicle_plate, sku, MAX(pergantian_ke) as max_pk
+        SELECT vehicle_plate, sku, year_cycle, MAX(pergantian_ke) as max_pk
         FROM unified_part_logs
-        GROUP BY vehicle_plate, sku
+        GROUP BY vehicle_plate, sku, year_cycle
         """
         return self.loader.fetch_df(query)
     
@@ -131,35 +132,75 @@ class NeonSyncService:
             
             # Explode rows
             exploded_df = explode_rows(unified_df)
-            exploded_df.sort_values(by=['vehicle_plate', 'sku', 'created_at'], inplace=True)
             
-            # --- SMART PERGANTIAN KE CALCULATION ---
-            # Calculate local cumcount first
-            exploded_df['local_pk'] = exploded_df.groupby(['vehicle_plate', 'sku']).cumcount() + 1
+            # Sort by created_at (ASC) - Critical for chronological calculations
+            exploded_df['created_at'] = pd.to_datetime(exploded_df['created_at'])
+            exploded_df.sort_values(by=['created_at'], ascending=True, inplace=True)
+            
+            # --- PASS 1: ENRICHMENT (Bulan Ke, Year Cycle) ---
+            # Call with skip_sequence_calc=True to only get Year Cycle and Config
+            print("   🛡️ Pass 1: Enriching Warranty Data...")
+            enriched_df = calculate_warranty_coverage(exploded_df, asset_df=asset_df, mapping_df=mapping_df, skip_sequence_calc=True)
+            
+            # --- SMART PERGANTIAN KE CALCULATION (INCREMENTAL) ---
+            # Calculate local cumcount
+            enriched_df['local_pk'] = enriched_df.groupby(['vehicle_plate', 'sku', 'year_cycle']).cumcount() + 1
             
             # Merge with offset
+            # Ensure year_cycle is int
+            if 'year_cycle' in enriched_df.columns:
+                enriched_df['year_cycle'] = enriched_df['year_cycle'].fillna(0).astype(int)
+            
             if not offset_df.empty:
-                exploded_df = pd.merge(
-                    exploded_df,
+                # Ensure types match for merge
+                if 'year_cycle' in offset_df.columns:
+                    offset_df['year_cycle'] = offset_df['year_cycle'].fillna(0).astype(int)
+                
+                enriched_df = pd.merge(
+                    enriched_df,
                     offset_df,
-                    on=['vehicle_plate', 'sku'],
+                    on=['vehicle_plate', 'sku', 'year_cycle'],
                     how='left'
                 )
-                exploded_df['max_pk'] = exploded_df['max_pk'].fillna(0).astype(int)
-                exploded_df['pergantian_ke'] = exploded_df['max_pk'] + exploded_df['local_pk']
-                exploded_df.drop(columns=['max_pk', 'local_pk'], inplace=True)
+                enriched_df['max_pk'] = enriched_df['max_pk'].fillna(0).astype(int)
+                enriched_df['pergantian_ke'] = enriched_df['max_pk'] + enriched_df['local_pk']
+                enriched_df.drop(columns=['max_pk', 'local_pk'], inplace=True)
             else:
-                exploded_df['pergantian_ke'] = exploded_df['local_pk']
-                exploded_df.drop(columns=['local_pk'], inplace=True)
+                enriched_df['pergantian_ke'] = enriched_df['local_pk']
+                enriched_df.drop(columns=['local_pk'], inplace=True)
             
+            # --- PASS 2: FINAL COVERAGE CHECK ---
+            # Call again with skip_sequence_calc=True. 
+            # It will reuse the 'pergantian_ke' we just calculated to determine correct 'warranty_coverage'.
+            print("   🛡️ Pass 2: Final Warranty Coverage Check...")
+            final_enriched_df = calculate_warranty_coverage(enriched_df, asset_df=asset_df, mapping_df=mapping_df, skip_sequence_calc=True)
+            
+            # Ensure all required columns exist (matching run.py)
+            final_columns = [
+                'source_system', 'created_at', 'order_number', 'vehicle_plate', 'sku', 'item_name', 
+                'erp_product_id', 'item_type', 'service_type', 'service_location_name', 'completed_by', 
+                'customer_type', 'quantity', 'unit_price', 'final_price', 'subtotal_price', 'old_price',
+                'warranty_status', 'status', 'odometer', 'bike_type',
+                # NEW warranty columns
+                'delivery_date', 'bulan_ke', 'year_cycle', 'customer_category',
+                'warranty_type', 'covered_for', 'limit_per_year', 'pergantian_ke', 'warranty_coverage'
+            ]
+            
+            # Add missing columns with defaults
+            for col in final_columns:
+                if col not in final_enriched_df.columns:
+                    final_enriched_df[col] = None
+            
+            final_df = final_enriched_df[final_columns].copy()
+
             # Deduplication
-            key_cols = ['source_system', 'order_number', 'sku', 'item_name', 'pergantian_ke']
-            exploded_df = exploded_df.drop_duplicates(subset=key_cols, keep='first')
+            key_cols = ['source_system', 'order_number', 'sku', 'item_name', 'year_cycle', 'pergantian_ke']
+            final_df = final_df.drop_duplicates(subset=key_cols, keep='first')
             
             # --- INSERT TO NEON ---
-            if not exploded_df.empty:
-                self.loader.load_df_append(exploded_df, 'unified_part_logs')
-                stats['total_inserted'] = len(exploded_df)
+            if not final_df.empty:
+                self.loader.load_df_append(final_df, 'unified_part_logs')
+                stats['total_inserted'] = len(final_df)
             
             stats['status'] = 'success'
             
