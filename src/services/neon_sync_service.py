@@ -94,9 +94,6 @@ class NeonSyncService:
             else:
                 max_date_filter = None
             
-            # Get existing pergantian_ke offsets
-            offset_df = self.get_max_pergantian_ke()
-            
             # Load auxiliary data
             asset_df = self.data_loader.load_gspread_data(SHEET_ID_ASSET_LIST, WORKSHEET_ASSET)
             mapping_df = self.data_loader.load_gspread_data(SHEET_ID_MAPPINGS, WORKSHEET_MAPPINGS)
