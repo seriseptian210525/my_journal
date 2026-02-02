@@ -245,7 +245,7 @@ if NEON_AVAILABLE:
                     "final_price": st.column_config.NumberColumn("Price", format="Rp %.0f"),
                     "warranty_status": st.column_config.TextColumn("Warranty Coverage"), # Renamed header
                     "pergantian_ke": st.column_config.NumberColumn("Pergantian Ke", format="%d"),
-                    "odometer": st.column_config.NumberColumn("Odometer", format="%,d km")
+                    "odometer": st.column_config.NumberColumn("Odometer (km)", format="%d")
                 }
             )
         else:
