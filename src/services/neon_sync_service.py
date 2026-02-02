@@ -46,13 +46,23 @@ class NeonSyncService:
             self._data_loader = DataLoader()
         return self._data_loader
     
-    def get_max_pergantian_ke(self) -> pd.DataFrame:
+    def get_max_total_pk(self) -> pd.DataFrame:
         """
-        Get MAX pergantian_ke per (vehicle_plate, sku, year_cycle) from Neon.
-        Used for offset calculation in incremental mode.
+        Get MAX pergantian_ke_total per (vehicle_plate, sku) from Neon.
         """
         query = """
-        SELECT vehicle_plate, sku, year_cycle, MAX(pergantian_ke) as max_pk
+        SELECT vehicle_plate, sku, MAX(pergantian_ke_total) as max_pk_total
+        FROM unified_part_logs
+        GROUP BY vehicle_plate, sku
+        """
+        return self.loader.fetch_df(query)
+
+    def get_max_yearly_pk(self) -> pd.DataFrame:
+        """
+        Get MAX pergantian_ke_yearly per (vehicle_plate, sku, year_cycle) from Neon.
+        """
+        query = """
+        SELECT vehicle_plate, sku, year_cycle, MAX(pergantian_ke_yearly) as max_pk_yearly
         FROM unified_part_logs
         GROUP BY vehicle_plate, sku, year_cycle
         """
@@ -126,11 +136,21 @@ class NeonSyncService:
                 stats['status'] = 'no_new_data'
                 return stats
             
-            unified_df = pd.concat([si_df, pu_df], ignore_index=True)
+            # --- DEDUPLICATION (CROSS-SOURCE) BEFORE EXPLODE ---
+            # Remove duplicates from Apps vs Manual Sheet while preserving qty-based rows
             unified_df['created_at'] = pd.to_datetime(unified_df['created_at'])
-            unified_df.sort_values(by=['created_at'], inplace=True)
+            unified_df['created_date'] = unified_df['created_at'].dt.date
+            key_cols = ['vehicle_plate', 'sku', 'created_date', 'service_location_name']
             
-            # Explode rows
+            before_dedup = len(unified_df)
+            unified_df = unified_df.drop_duplicates(subset=key_cols, keep='first')
+            after_dedup = len(unified_df)
+            unified_df = unified_df.drop(columns=['created_date'], errors='ignore')
+            
+            if before_dedup != after_dedup:
+                print(f"   🔄 Deduped batch: {before_dedup - after_dedup} rows removed.")
+
+            # Explode rows (Split Qty > 1)
             exploded_df = explode_rows(unified_df)
             
             # Sort by created_at (ASC) - Critical for chronological calculations
@@ -143,31 +163,42 @@ class NeonSyncService:
             enriched_df = calculate_warranty_coverage(exploded_df, asset_df=asset_df, mapping_df=mapping_df, skip_sequence_calc=True)
             
             # --- SMART PERGANTIAN KE CALCULATION (INCREMENTAL) ---
-            # Calculate local cumcount
-            enriched_df['local_pk'] = enriched_df.groupby(['vehicle_plate', 'sku', 'year_cycle']).cumcount() + 1
+            # 1. Calculate local sequences
+            enriched_df['local_total'] = enriched_df.groupby(['vehicle_plate', 'sku']).cumcount() + 1
+            enriched_df['local_yearly'] = enriched_df.groupby(['vehicle_plate', 'sku', 'year_cycle']).cumcount() + 1
             
-            # Merge with offset
-            # Ensure year_cycle is int
+            # 2. Fetch offsets
+            print("   📥 Fetching existing counters from Neon...")
+            df_max_total = self.get_max_total_pk()
+            df_max_yearly = self.get_max_yearly_pk()
+            
+            # 3. Merge & Add Offsets
+            # Ensure types match
             if 'year_cycle' in enriched_df.columns:
                 enriched_df['year_cycle'] = enriched_df['year_cycle'].fillna(0).astype(int)
             
-            if not offset_df.empty:
-                # Ensure types match for merge
-                if 'year_cycle' in offset_df.columns:
-                    offset_df['year_cycle'] = offset_df['year_cycle'].fillna(0).astype(int)
-                
-                enriched_df = pd.merge(
-                    enriched_df,
-                    offset_df,
-                    on=['vehicle_plate', 'sku', 'year_cycle'],
-                    how='left'
-                )
-                enriched_df['max_pk'] = enriched_df['max_pk'].fillna(0).astype(int)
-                enriched_df['pergantian_ke'] = enriched_df['max_pk'] + enriched_df['local_pk']
-                enriched_df.drop(columns=['max_pk', 'local_pk'], inplace=True)
+            # -- Total Sequence --
+            if not df_max_total.empty:
+                enriched_df = pd.merge(enriched_df, df_max_total, on=['vehicle_plate', 'sku'], how='left')
+                enriched_df['max_pk_total'] = enriched_df['max_pk_total'].fillna(0).astype(int)
+                enriched_df['pergantian_ke_total'] = enriched_df['max_pk_total'] + enriched_df['local_total']
+                enriched_df.drop(columns=['max_pk_total', 'local_total'], inplace=True, errors='ignore')
             else:
-                enriched_df['pergantian_ke'] = enriched_df['local_pk']
-                enriched_df.drop(columns=['local_pk'], inplace=True)
+                 enriched_df['pergantian_ke_total'] = enriched_df['local_total']
+                 enriched_df.drop(columns=['local_total'], inplace=True, errors='ignore')
+                 
+            # -- Yearly Sequence --
+            if not df_max_yearly.empty:
+                if 'year_cycle' in df_max_yearly.columns:
+                     df_max_yearly['year_cycle'] = df_max_yearly['year_cycle'].fillna(0).astype(int)
+                     
+                enriched_df = pd.merge(enriched_df, df_max_yearly, on=['vehicle_plate', 'sku', 'year_cycle'], how='left')
+                enriched_df['max_pk_yearly'] = enriched_df['max_pk_yearly'].fillna(0).astype(int)
+                enriched_df['pergantian_ke_yearly'] = enriched_df['max_pk_yearly'] + enriched_df['local_yearly']
+                enriched_df.drop(columns=['max_pk_yearly', 'local_yearly'], inplace=True, errors='ignore')
+            else:
+                 enriched_df['pergantian_ke_yearly'] = enriched_df['local_yearly']
+                 enriched_df.drop(columns=['local_yearly'], inplace=True, errors='ignore')
             
             # --- PASS 2: FINAL COVERAGE CHECK ---
             # Call again with skip_sequence_calc=True. 
@@ -183,7 +214,7 @@ class NeonSyncService:
                 'warranty_status', 'status', 'odometer', 'bike_type',
                 # NEW warranty columns
                 'delivery_date', 'bulan_ke', 'year_cycle', 'customer_category',
-                'warranty_type', 'covered_for', 'limit_per_year', 'pergantian_ke', 'warranty_coverage'
+                'warranty_type', 'covered_for', 'limit_per_year', 'pergantian_ke_total', 'pergantian_ke_yearly', 'warranty_coverage'
             ]
             
             # Add missing columns with defaults
@@ -192,10 +223,6 @@ class NeonSyncService:
                     final_enriched_df[col] = None
             
             final_df = final_enriched_df[final_columns].copy()
-
-            # Deduplication
-            key_cols = ['source_system', 'order_number', 'sku', 'item_name', 'year_cycle', 'pergantian_ke']
-            final_df = final_df.drop_duplicates(subset=key_cols, keep='first')
             
             # --- INSERT TO NEON ---
             if not final_df.empty:

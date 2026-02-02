@@ -61,14 +61,12 @@ def init_db():
             warranty_type VARCHAR(50),             -- From Mappings
             covered_for VARCHAR(255),              -- From Mappings
             limit_per_year INTEGER DEFAULT 0,      -- From Mappings
-            pergantian_ke INTEGER DEFAULT 1,       -- Cumulative per vehicle+sku+year_cycle
+            pergantian_ke_total INTEGER DEFAULT 1, -- Cumulative per vehicle+sku (never resets)
+            pergantian_ke_yearly INTEGER DEFAULT 1,-- Cumulative per vehicle+sku+year_cycle (resets yearly)
             warranty_coverage VARCHAR(50),         -- Final calculated warranty status
             
             -- System Metadata
-            ingested_at TIMESTAMP DEFAULT NOW(),
-            
-            -- Unique Key for Deduplication (includes year_cycle for proper reset)
-            CONSTRAINT unique_log_entry UNIQUE(source_system, order_number, sku, item_name, year_cycle, pergantian_ke)
+            ingested_at TIMESTAMP DEFAULT NOW()
         );
         """
         

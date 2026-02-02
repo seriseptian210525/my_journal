@@ -120,7 +120,20 @@ def run_pipeline():
     unified_df = pd.concat([si_df, pu_df], ignore_index=True)
     print(f"   Merged Total: {len(unified_df)} rows.")
     
-    # Explode (Split Qty > 1)
+    # DEDUPLICATION: Remove cross-source duplicates BEFORE explode
+    # Key: (vehicle_plate, sku, created_date, service_location_name)
+    # This removes duplicates from Apps vs Manual Sheet while preserving qty-based rows
+    print("   🔄 Deduplicating cross-source duplicates (BEFORE explode)...")
+    unified_df['created_at'] = pd.to_datetime(unified_df['created_at'])
+    unified_df['created_date'] = unified_df['created_at'].dt.date
+    key_cols = ['vehicle_plate', 'sku', 'created_date', 'service_location_name']
+    before_dedup = len(unified_df)
+    unified_df = unified_df.drop_duplicates(subset=key_cols, keep='first')
+    after_dedup = len(unified_df)
+    unified_df = unified_df.drop(columns=['created_date'], errors='ignore')
+    print(f"   Deduplicated: {before_dedup} → {after_dedup} (removed {before_dedup - after_dedup})")
+    
+    # Explode (Split Qty > 1) - AFTER dedup, so qty-based rows are preserved
     print("   💥 Exploding rows (Qty > 1)...")
     exploded_df = explode_rows(unified_df)
     print(f"   Post-Explosion Total: {len(exploded_df)} rows.")
@@ -137,7 +150,7 @@ def run_pipeline():
     
     # Sample Check
     if not enriched_df.empty:
-        sample = enriched_df[['vehicle_plate', 'sku', 'customer_category', 'bulan_ke', 'year_cycle', 'pergantian_ke', 'warranty_coverage']].head(5)
+        sample = enriched_df[['vehicle_plate', 'sku', 'customer_category', 'bulan_ke', 'year_cycle', 'pergantian_ke_total', 'pergantian_ke_yearly', 'warranty_coverage']].head(5)
         print(f"   Sample Enriched Data:\n{sample}")
     
     # --- 5. PREPARE FINAL COLUMNS ---
@@ -151,7 +164,7 @@ def run_pipeline():
         'warranty_status', 'status', 'odometer', 'bike_type',
         # NEW warranty columns
         'delivery_date', 'bulan_ke', 'year_cycle', 'customer_category',
-        'warranty_type', 'covered_for', 'limit_per_year', 'pergantian_ke', 'warranty_coverage'
+        'warranty_type', 'covered_for', 'limit_per_year', 'pergantian_ke_total', 'pergantian_ke_yearly', 'warranty_coverage'
     ]
     
     # Add missing columns with defaults
@@ -160,14 +173,6 @@ def run_pipeline():
             enriched_df[col] = None
     
     final_df = enriched_df[final_columns].copy()
-    
-    # DEDUPLICATION: Remove duplicates based on unique constraint columns
-    key_cols = ['source_system', 'order_number', 'sku', 'item_name', 'year_cycle', 'pergantian_ke']
-    before_dedup = len(final_df)
-    final_df = final_df.drop_duplicates(subset=key_cols, keep='first')
-    after_dedup = len(final_df)
-    if before_dedup != after_dedup:
-        print(f"   🔄 Deduplicated: {before_dedup} → {after_dedup} (removed {before_dedup - after_dedup})")
 
     # SORT GLOBAL BY CREATED_AT (ASC)
     # Ensure ID 1 corresponds to earliest date (2024)

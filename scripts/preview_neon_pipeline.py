@@ -75,12 +75,24 @@ def preview_pipeline(export_csv=True, sample_size=None):
     unified_df = pd.concat([si_df, pu_df], ignore_index=True)
     print(f"   Merged Total: {len(unified_df)} rows.")
     
-    # Explode
+    # --- DEDUPLICATION BEFORE EXPLODE ---
+    # Remove cross-source duplicates while preserving qty-based rows
+    print("\n🔄 Deduplicating cross-source duplicates (BEFORE explode)...")
     unified_df['created_at'] = pd.to_datetime(unified_df['created_at'])
+    unified_df['created_date'] = unified_df['created_at'].dt.date
+    key_cols = ['vehicle_plate', 'sku', 'created_date', 'service_location_name']
+    before_dedup = len(unified_df)
+    unified_df = unified_df.drop_duplicates(subset=key_cols, keep='first')
+    after_dedup = len(unified_df)
+    unified_df = unified_df.drop(columns=['created_date'], errors='ignore')
+    print(f"   Deduplicated: {before_dedup} → {after_dedup} (removed {before_dedup - after_dedup})")
+    
+    # Explode AFTER dedup
     exploded_df = explode_rows(unified_df)
     print(f"   Post-Explosion Total: {len(exploded_df)} rows.")
     
     # Sort
+    exploded_df['created_at'] = pd.to_datetime(exploded_df['created_at'])
     exploded_df.sort_values(by=['created_at'], ascending=True, inplace=True)
     
     # --- WARRANTY CALCULATION ---

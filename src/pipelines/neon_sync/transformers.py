@@ -175,7 +175,10 @@ def calculate_warranty_coverage(df, asset_df=None, mapping_df=None, skip_sequenc
     # --- Step 6: Calculate Pergantian Ke (Conditionally Skipped) ---
     if not skip_sequence_calc:
         out = out.sort_values(['vehicle_plate', 'sku', 'created_at']).reset_index(drop=True)
-        out['pergantian_ke'] = out.groupby(['vehicle_plate', 'sku', 'year_cycle']).cumcount() + 1
+        # Total: cumulative per (vehicle_plate, sku) - never resets
+        out['pergantian_ke_total'] = out.groupby(['vehicle_plate', 'sku']).cumcount() + 1
+        # Yearly: cumulative per (vehicle_plate, sku, year_cycle) - resets each year
+        out['pergantian_ke_yearly'] = out.groupby(['vehicle_plate', 'sku', 'year_cycle']).cumcount() + 1
     
     # --- Step 7: Calculate Warranty Coverage ---
     def check_warranty_coverage(row):
@@ -185,7 +188,7 @@ def calculate_warranty_coverage(df, asset_df=None, mapping_df=None, skip_sequenc
         covered_for = str(row.get('covered_for', '') or '').upper()
         cust_cat = str(row.get('customer_category', '') or '').upper()
         limit = int(row.get('limit_per_year', 0) or 0)
-        pergantian = int(row.get('pergantian_ke', 1) or 1)
+        pergantian = int(row.get('pergantian_ke_yearly', 1) or 1)
         warranty_types = str(row.get('warranty_type', '') or '').upper()
         bulan_ke = int(row.get('bulan_ke', 0) or 0)
         periode_garansi = int(row.get('periode_garansi', 0) or 0)
