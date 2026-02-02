@@ -59,10 +59,43 @@ DRIVER_CATEGORY_RULES = _wo_config.get('driver_category_rules', {})
 env_path = BASE_DIR / ".env"
 load_dotenv(dotenv_path=env_path)
 
+# --- Helper for Secrets Loading ---
+def get_secret(key, section=None, default=''):
+    """Helper to get secret from os.getenv or st.secrets"""
+    # 1. Try Environment Variable
+    val = os.getenv(key)
+    if val:
+        return val
+    
+    # 2. Try Streamlit Secrets
+    try:
+        import streamlit as st
+        if hasattr(st, "secrets"):
+            if section and section in st.secrets and key in st.secrets[section]:
+                return st.secrets[section][key]
+            # Try top level
+            if key in st.secrets:
+                return st.secrets[key]
+            # Special case for mappings based on known structure
+            if section == "sheets":
+                # Mapping config.py vars to secrets.toml keys
+                key_map = {
+                    'SHEET_ID_SERVICE_ITEMS': 'service_items',
+                    'SHEET_ID_MAPPINGS': 'mappings',
+                    'SHEET_ID_OUTPUT_REVIEW': 'part_usage'
+                }
+                toml_key = key_map.get(key)
+                if toml_key and toml_key in st.secrets["sheets"]:
+                    return st.secrets["sheets"][toml_key]
+    except:
+        pass
+        
+    return default
+
 # Service Items Pipeline
-SHEET_ID_MAPPINGS = os.getenv('SHEET_ID_MAPPINGS', '')
+SHEET_ID_MAPPINGS = get_secret('SHEET_ID_MAPPINGS', 'sheets')
 WORKSHEET_MAPPINGS = os.getenv('WORKSHEET_MAPPINGS', 'Mappings')
-SHEET_ID_SERVICE_ITEMS = os.getenv('SHEET_ID_SERVICE_ITEMS', '')
+SHEET_ID_SERVICE_ITEMS = get_secret('SHEET_ID_SERVICE_ITEMS', 'sheets')
 WORKSHEET_SERVICE_ITEMS = os.getenv('WORKSHEET_SERVICE_ITEMS', 'service_items')
 WORKSHEET_IGNORE_PART = os.getenv('WORKSHEET_IGNORE_PART', 'ignore_part')
 
@@ -119,7 +152,7 @@ SHEET_ID_LOCATIONS = os.getenv('SHEET_ID_LOCATIONS', '')
 WORKSHEET_LOCATIONS = os.getenv('WORKSHEET_LOCATIONS', 'service_locations')
 
 # Output Review 
-SHEET_ID_OUTPUT_REVIEW = os.getenv('SHEET_ID_OUTPUT_REVIEW', '')
+SHEET_ID_OUTPUT_REVIEW = get_secret('SHEET_ID_OUTPUT_REVIEW', 'sheets')
 WORKSHEET_OUTPUT_REVIEW = os.getenv('WORKSHEET_OUTPUT_REVIEW', 'work_orders_v2')
 WORKSHEET_PART_USAGE = os.getenv('WORKSHEET_PART_USAGE', 'part_usage')
 
@@ -129,16 +162,7 @@ LOCATION_FIX_MODE = os.getenv('LOCATION_FIX_MODE', 'hybrid')  # 'hybrid' or 'ful
 # --- Neon Database Config ---
 def _get_neon_connection_string():
     """Get Neon connection string - supports both Streamlit Cloud and local."""
-    # Try st.secrets first (Streamlit Cloud)
-    try:
-        import streamlit as st
-        if hasattr(st, 'secrets') and 'neon' in st.secrets:
-            return st.secrets['neon']['connection_string']
-    except:
-        pass
-    
-    # Fallback to environment variable (local development)
-    return os.getenv('NEON_DB_CONNECTION_STRING')
+    return get_secret('NEON_DB_CONNECTION_STRING') or get_secret('connection_string', 'neon')
 
 NEON_DB_CONNECTION_STRING = _get_neon_connection_string()
 
