@@ -235,6 +235,15 @@ class NeonSyncService:
             if filters.get('warranty_coverage') and filters['warranty_coverage'] != 'All':
                 where_clauses.append("warranty_coverage = :warranty")
                 params['warranty'] = filters['warranty_coverage']
+                
+            # Date Range Filters
+            if filters.get('start_date'):
+                where_clauses.append("created_at >= :start_date")
+                params['start_date'] = filters['start_date']
+            
+            if filters.get('end_date'):
+                where_clauses.append("created_at <= :end_date")
+                params['end_date'] = filters['end_date']
         
         where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
         
@@ -291,35 +300,74 @@ class NeonSyncService:
             
         return options
     
-    def get_cohort_data(self, vehicle_plate: str = None) -> pd.DataFrame:
+    def get_cohort_data(self, filters: dict = None) -> pd.DataFrame:
         """
         Get cohort data for heatmap visualization.
         Shows pergantian_ke timeline per vehicle+sku.
+        Apply all filters including dates.
         """
-        query = """
+        where_clauses = ["vehicle_plate IS NOT NULL"]
+        params = {}
+        
+        if filters:
+            if filters.get('vehicle_plate') and filters['vehicle_plate'] != 'All':
+                where_clauses.append("vehicle_plate = :plate")
+                params['plate'] = filters['vehicle_plate']
+            
+            # Additional filters for charts
+            if filters.get('start_date'):
+                where_clauses.append("created_at >= :start_date")
+                params['start_date'] = filters['start_date']
+            
+            if filters.get('end_date'):
+                where_clauses.append("created_at <= :end_date")
+                params['end_date'] = filters['end_date']
+
+        where_sql = " AND ".join(where_clauses)
+
+        query = f"""
         SELECT 
             vehicle_plate,
             sku,
             item_name,
             DATE_TRUNC('month', created_at) as month,
             pergantian_ke,
-            final_price
+            final_price,
+            odometer,
+            warranty_coverage,
+            created_at
         FROM unified_part_logs
-        WHERE vehicle_plate IS NOT NULL
+        WHERE {where_sql}
+        ORDER BY vehicle_plate, sku, created_at
         """
         
-        if vehicle_plate:
-            query += f" AND vehicle_plate ILIKE '%{vehicle_plate}%'"
-        
-        query += " ORDER BY vehicle_plate, sku, created_at"
-        
-        return self.loader.fetch_df(query)
+        return self.loader.fetch_df(query, params)
     
-    def get_cost_per_km_data(self) -> pd.DataFrame:
+    def get_cost_per_km_data(self, filters: dict = None) -> pd.DataFrame:
         """
         Get cost/km data for chart visualization.
+        Apply filters including dates.
         """
-        query = """
+        where_clauses = ["odometer > 0"]
+        params = {}
+        
+        if filters:
+            if filters.get('start_date'):
+                where_clauses.append("created_at >= :start_date")
+                params['start_date'] = filters['start_date']
+            
+            if filters.get('end_date'):
+                where_clauses.append("created_at <= :end_date")
+                params['end_date'] = filters['end_date']
+            
+            # Also apply other filters if relevant for context
+            if filters.get('vehicle_plate') and filters['vehicle_plate'] != 'All':
+                where_clauses.append("vehicle_plate = :plate")
+                params['plate'] = filters['vehicle_plate']
+        
+        where_sql = " AND ".join(where_clauses)
+        
+        query = f"""
         SELECT 
             vehicle_plate,
             bike_type,
@@ -327,14 +375,14 @@ class NeonSyncService:
             MAX(odometer) - MIN(odometer) as km_traveled,
             COUNT(*) as service_count
         FROM unified_part_logs
-        WHERE odometer > 0
+        WHERE {where_sql}
         GROUP BY vehicle_plate, bike_type
         HAVING MAX(odometer) - MIN(odometer) > 0
         ORDER BY SUM(final_price) / NULLIF(MAX(odometer) - MIN(odometer), 0) DESC
         LIMIT 100
         """
         
-        df = self.loader.fetch_df(query)
+        df = self.loader.fetch_df(query, params)
         if not df.empty:
             df['cost_per_km'] = df['total_cost'] / df['km_traveled']
         return df

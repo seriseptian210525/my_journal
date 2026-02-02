@@ -4,6 +4,7 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+import calendar
 import math
 
 # Page config
@@ -91,6 +92,13 @@ st.markdown("---")
 st.subheader("🔍 Filter Data")
 
 # Initialize session state for filters
+if 'filter_date_mode' not in st.session_state:
+    st.session_state.filter_date_mode = "All Time"
+if 'filter_start_date' not in st.session_state:
+    st.session_state.filter_start_date = None
+if 'filter_end_date' not in st.session_state:
+    st.session_state.filter_end_date = None
+
 if 'filter_plate' not in st.session_state:
     st.session_state.filter_plate = "All"
 if 'filter_item' not in st.session_state:
@@ -116,7 +124,61 @@ if NEON_AVAILABLE:
     except Exception as e:
         st.error(f"Error loading filter options: {e}")
 
+# --- Date Filter Section ---
+st.markdown("##### 📅 Date Filter")
+col_date_mode, col_date_input = st.columns([1, 3])
+
+with col_date_mode:
+    date_mode_options = ["All Time", "Specific Date", "Date Range", "Month & Year"]
+    current_mode_idx = date_mode_options.index(st.session_state.filter_date_mode) if st.session_state.filter_date_mode in date_mode_options else 0
+    date_mode = st.selectbox(
+        "Mode",
+        date_mode_options,
+        index=current_mode_idx,
+        key="input_date_mode"
+    )
+
+start_date_input = None
+end_date_input = None
+
+with col_date_input:
+    if date_mode == "Specific Date":
+        date_val = st.date_input("Select Date", value=datetime.today(), key="input_date_specific")
+        if date_val:
+            start_date_input = datetime.combine(date_val, datetime.min.time())
+            end_date_input = datetime.combine(date_val, datetime.max.time())
+            
+    elif date_mode == "Date Range":
+        # Default to last 30 days
+        default_start = datetime.today() - timedelta(days=30)
+        default_end = datetime.today()
+        date_range = st.date_input(
+            "Select Range",
+            value=(default_start, default_end),
+            key="input_date_range"
+        )
+        if isinstance(date_range, tuple) and len(date_range) == 2:
+            start_date_input = datetime.combine(date_range[0], datetime.min.time())
+            end_date_input = datetime.combine(date_range[1], datetime.max.time())
+            
+    elif date_mode == "Month & Year":
+        c1, c2 = st.columns(2)
+        with c1:
+            month_names = list(calendar.month_name)[1:]
+            current_month_idx = datetime.today().month - 1
+            selected_month = st.selectbox("Month", month_names, index=current_month_idx, key="input_month")
+        with c2:
+            current_year = datetime.today().year
+            selected_year = st.number_input("Year", min_value=2020, max_value=2030, value=current_year, step=1, key="input_year")
+        
+        if selected_month and selected_year:
+            month_idx = list(calendar.month_name).index(selected_month)
+            _, last_day = calendar.monthrange(selected_year, month_idx)
+            start_date_input = datetime(selected_year, month_idx, 1)
+            end_date_input = datetime(selected_year, month_idx, last_day, 23, 59, 59)
+
 # Filter inputs
+st.markdown("##### 🏷️ Category Filters")
 filter_col1, filter_col2, filter_col3, filter_col4, filter_col5 = st.columns([1.5, 1.5, 1.5, 1, 0.8])
 
 with filter_col1:
@@ -151,6 +213,12 @@ if apply_filter:
     st.session_state.filter_item = filter_item
     st.session_state.filter_customer = filter_customer
     st.session_state.filter_warranty = filter_warranty
+    
+    # Save Date State
+    st.session_state.filter_date_mode = date_mode
+    st.session_state.filter_start_date = start_date_input
+    st.session_state.filter_end_date = end_date_input
+
     st.session_state.current_page = 1  # Reset to page 1
     st.rerun()
 
@@ -162,6 +230,12 @@ with col_clear:
         st.session_state.filter_item = "All"
         st.session_state.filter_customer = "All"
         st.session_state.filter_warranty = "All"
+        
+        # Reset Date
+        st.session_state.filter_date_mode = "All Time"
+        st.session_state.filter_start_date = None
+        st.session_state.filter_end_date = None
+        
         st.session_state.current_page = 1
         st.rerun()
 
@@ -176,10 +250,31 @@ if st.session_state.filter_customer != "All":
 if st.session_state.filter_warranty != "All":
     filters['warranty_coverage'] = st.session_state.filter_warranty
 
+# Add Date Filters
+if st.session_state.filter_date_mode != "All Time":
+    if st.session_state.filter_start_date:
+        filters['start_date'] = st.session_state.filter_start_date
+    if st.session_state.filter_end_date:
+        filters['end_date'] = st.session_state.filter_end_date
+
 # Show active filters
 if filters:
-    active_filters = " | ".join([f"**{k}**: {v}" for k, v in filters.items()])
-    st.info(f"🏷️ Active Filters: {active_filters}")
+    active_filters = []
+    if st.session_state.filter_date_mode != "All Time":
+        d_str = f"{st.session_state.filter_date_mode}"
+        if st.session_state.filter_start_date:
+            d_str += f" ({st.session_state.filter_start_date.strftime('%Y-%m-%d')}"
+            if st.session_state.filter_end_date:
+                d_str += f" to {st.session_state.filter_end_date.strftime('%Y-%m-%d')})"
+            else:
+                 d_str += ")"
+        active_filters.append(d_str)
+        
+    for k, v in filters.items():
+        if k not in ['start_date', 'end_date']:
+             active_filters.append(f"**{k}**: {v}")
+             
+    st.info(f"🏷️ Active Filters: {' | '.join(active_filters)}")
 
 # =============================================================================
 # PAGINATED DATA TABLE
@@ -267,56 +362,124 @@ chart_tab1, chart_tab2 = st.tabs(["🔥 Cohort Heatmap", "💰 Cost per KM"])
 # --- COHORT HEATMAP ---
 with chart_tab1:
     st.markdown("### Pergantian Part per Asset")
-    st.caption("Heatmap menunjukkan berapa kali setiap item diganti per kendaraan")
+    st.caption("Matriks Odometer saat pergantian part. Kuning = Reset Cycle / Package Service.")
     
-    if NEON_AVAILABLE:
-        cohort_plate = st.text_input("Filter by Plat Nomor (optional)", key="cohort_plate", placeholder="B 1234 XX")
+    try:
+        # Pass ALL filters including dates
+        cohort_df = neon_service.get_cohort_data(filters=filters if filters else None)
         
-        try:
-            cohort_df = neon_service.get_cohort_data(cohort_plate if cohort_plate else None)
+        if not cohort_df.empty:
+            # 1. AUTO-SELECT LOGIC
+            # If no specific vehicle filter is selected, pick the most active one
+            selected_plate = None
+            is_auto_selected = False
             
-            if not cohort_df.empty:
-                # Limit to top 20 vehicles for readability
-                top_vehicles = cohort_df['vehicle_plate'].value_counts().head(20).index
-                cohort_filtered = cohort_df[cohort_df['vehicle_plate'].isin(top_vehicles)]
-                
-                # Pivot for heatmap
-                heatmap_data = cohort_filtered.groupby(['vehicle_plate', 'item_name'])['pergantian_ke'].max().reset_index()
-                heatmap_pivot = heatmap_data.pivot(index='vehicle_plate', columns='item_name', values='pergantian_ke').fillna(0)
-                
-                if not heatmap_pivot.empty:
-                    # Limit columns for readability
-                    if len(heatmap_pivot.columns) > 15:
-                        top_items = heatmap_data.groupby('item_name')['pergantian_ke'].sum().nlargest(15).index
-                        heatmap_pivot = heatmap_pivot[top_items]
-                    
-                    fig_heatmap = px.imshow(
-                        heatmap_pivot,
-                        labels=dict(x="Item", y="Vehicle", color="Pergantian Ke"),
-                        aspect="auto",
-                        color_continuous_scale="YlOrRd",
-                        title="Pergantian Ke Heatmap (Max per Vehicle-Item)"
-                    )
-                    fig_heatmap.update_layout(height=500)
-                    st.plotly_chart(fig_heatmap, use_container_width=True)
-                else:
-                    st.info("No data available for heatmap")
+            if filters.get('vehicle_plate'):
+                selected_plate = filters['vehicle_plate']
             else:
-                st.info("No cohort data available")
+                # Find vehicle with most rows
+                most_active_plate = cohort_df['vehicle_plate'].value_counts().idxmax()
+                selected_plate = most_active_plate
+                is_auto_selected = True
+                st.info(f"⚠️ Menampilkan data untuk kendaraan dengan aktivitas tertinggi: **{selected_plate}** (Gunakan filter 'Plat Nomor' untuk melihat kendaraan lain)")
+
+            # Filter data for the selected plate
+            df_plate = cohort_df[cohort_df['vehicle_plate'] == selected_plate].copy()
+            
+            if not df_plate.empty:
+                # 2. OCCURRENCE SEQUENCE LOGIC (Time-based rank)
+                # Sort by item and time
+                df_plate = df_plate.sort_values(['item_name', 'created_at'])
                 
-        except Exception as e:
-            st.error(f"Error loading cohort data: {e}")
-    else:
-        st.warning("Connect to Neon to view analytics")
+                # Create 'Ke-X' sequence based on actual occurrence order
+                df_plate['occurrence_rank'] = df_plate.groupby('item_name').cumcount() + 1
+                
+                # 3. PIVOT (Values = Odometer)
+                # We format Odometer as string with thousands separator for readability
+                df_plate['odometer_fmt'] = df_plate['odometer'].apply(lambda x: f"{x:,.0f}" if pd.notnull(x) else "-")
+                
+                # Pivot: Index=Item, Col=Rank, Val=Odometer
+                pivot = df_plate.pivot_table(
+                    index='item_name', 
+                    columns='occurrence_rank', 
+                    values='odometer_fmt', 
+                    aggfunc='first'
+                ).fillna("")
+                
+                # Pivot for Styling (Logic Checks)
+                # We need the underlying data to know when to highlight
+                # We create a parallel pivot for 'warranty_coverage' and 'pergantian_ke'
+                pivot_warranty = df_plate.pivot_table(
+                    index='item_name', columns='occurrence_rank', values='warranty_coverage', aggfunc='first'
+                )
+                pivot_ke = df_plate.pivot_table(
+                    index='item_name', columns='occurrence_rank', values='pergantian_ke', aggfunc='first'
+                )
+                
+                # 4. DATA DISPLAY & STYLING
+                def highlight_cells(val):
+                    return 'background-color: transparent' # Default
+                    
+                def apply_heatmap_style(df_view):
+                    # Create styling dataframe (same shape as display df)
+                    df_style = pd.DataFrame('', index=df_view.index, columns=df_view.columns)
+                    
+                    try:
+                        # Iterate to check conditions
+                        for idx in df_style.index:
+                            for col in df_style.columns:
+                                style = ''
+                                # Condition 1: Package Service
+                                if idx in pivot_warranty.index and col in pivot_warranty.columns:
+                                    coverage = pivot_warranty.loc[idx, col]
+                                    if coverage == 'PACKAGE_SERVICE':
+                                        style = 'background-color: #FFD700; color: black; font-weight: bold' # Gold
+                                
+                                # Condition 2: Reset Detection (Current 'Ke' < Previous 'Ke')
+                                # Logic: Check pivot_ke. If rank 3 has pergantian_ke=1, it means reset.
+                                # But since we use occurrence_rank as cols, we can just check if pergantian_ke == 1 and rank > 1?
+                                # Or simpler: if warranty says PACKAGE_SERVICE it's usually a reset point.
+                                # Let's rely on package_service + reset check
+                                if idx in pivot_ke.index and col in pivot_ke.columns:
+                                        curr_ke = pivot_ke.loc[idx, col]
+                                        # If rank > 1 but pergantian_ke is 1, it's a reset
+                                        if isinstance(col, int) and col > 1 and curr_ke == 1:
+                                            style = 'background-color: #FFD700; color: black; font-weight: bold'
+                                            
+                                df_style.loc[idx, col] = style
+                    except Exception as e:
+                        pass # Fallback to no style on error
+                        
+                    return df_style
+
+                # Apply style
+                # Note: Styler apply only works if indices match.
+                st.dataframe(
+                    pivot.style.apply(apply_heatmap_style, axis=None),
+                    use_container_width=True,
+                    column_config={
+                        str(c): st.column_config.Column(f"Ke-{c}", width="small") 
+                        for c in pivot.columns
+                    }
+                )
+                
+            else:
+                st.info(f"No data found for vehicle {selected_plate} in this period.")
+        else:
+            st.info("No cohort data available for selected filters.")
+            
+    except Exception as e:
+        st.error(f"Error loading cohort data: {e}")
 
 # --- COST PER KM ---
 with chart_tab2:
     st.markdown("### Cost per Kilometer Analysis")
-    st.caption("Analisis biaya per kilometer untuk setiap kendaraan")
+    st.caption("Top vehicles by Cost Efficiency (Cost / KM). Requires Odometer data.")
     
     if NEON_AVAILABLE:
         try:
-            cost_df = neon_service.get_cost_per_km_data()
+            # Pass ALL filters including dates
+            cost_df = neon_service.get_cost_per_km_data(filters=filters if filters else None)
             
             if not cost_df.empty:
                 col_chart, col_stats = st.columns([2, 1])
