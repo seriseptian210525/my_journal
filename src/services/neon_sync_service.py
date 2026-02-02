@@ -220,21 +220,21 @@ class NeonSyncService:
         params = {}
         
         if filters:
-            if filters.get('vehicle_plate'):
-                where_clauses.append("vehicle_plate ILIKE :plate")
-                params['plate'] = f"%{filters['vehicle_plate']}%"
+            if filters.get('vehicle_plate') and filters['vehicle_plate'] != 'All':
+                where_clauses.append("vehicle_plate = :plate")
+                params['plate'] = filters['vehicle_plate']
             
-            if filters.get('item_name'):
-                where_clauses.append("item_name ILIKE :item")
-                params['item'] = f"%{filters['item_name']}%"
+            if filters.get('item_name') and filters['item_name'] != 'All':
+                where_clauses.append("item_name = :item")
+                params['item'] = filters['item_name']
             
-            if filters.get('customer_type'):
-                where_clauses.append("customer_type ILIKE :cust")
-                params['cust'] = f"%{filters['customer_type']}%"
+            if filters.get('customer_type') and filters['customer_type'] != 'All':
+                where_clauses.append("customer_type = :cust")
+                params['cust'] = filters['customer_type']
             
-            if filters.get('warranty_status'):
-                where_clauses.append("warranty_status = :warranty")
-                params['warranty'] = filters['warranty_status']
+            if filters.get('warranty_coverage') and filters['warranty_coverage'] != 'All':
+                where_clauses.append("warranty_coverage = :warranty")
+                params['warranty'] = filters['warranty_coverage']
         
         where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
         
@@ -244,11 +244,16 @@ class NeonSyncService:
         
         # Data query with pagination
         offset = (page - 1) * page_size
+        
+        # Use COALESCE/NULL handling if columns might be missing initially, but let's assume they exist per plan
         data_query = f"""
         SELECT 
             created_at, source_system, order_number, vehicle_plate, 
             sku, item_name, bike_type, customer_type, 
-            quantity, final_price, warranty_status, pergantian_ke, odometer
+            quantity, final_price, 
+            subtotal_price, old_price, 
+            warranty_coverage as warranty_status, -- Display coverage as warranty status
+            pergantian_ke, odometer
         FROM unified_part_logs 
         WHERE {where_sql}
         ORDER BY created_at DESC
@@ -258,6 +263,33 @@ class NeonSyncService:
         df = self.loader.fetch_df(data_query, params)
         
         return df, total_count
+
+    def get_filter_options(self) -> dict:
+        """Get unique options for filters from database."""
+        options = {}
+        try:
+            # 1. Vehicle Plates (Top 1000 active/recent)
+            plate_query = "SELECT DISTINCT vehicle_plate FROM unified_part_logs WHERE vehicle_plate IS NOT NULL ORDER BY vehicle_plate"
+            options['vehicle_plate'] = self.loader.fetch_df(plate_query)['vehicle_plate'].tolist()
+            
+            # 2. Item Names
+            item_query = "SELECT DISTINCT item_name FROM unified_part_logs WHERE item_name IS NOT NULL ORDER BY item_name"
+            options['item_name'] = self.loader.fetch_df(item_query)['item_name'].tolist()
+            
+            # 3. Customer Type
+            cust_query = "SELECT DISTINCT customer_type FROM unified_part_logs WHERE customer_type IS NOT NULL ORDER BY customer_type"
+            options['customer_type'] = self.loader.fetch_df(cust_query)['customer_type'].tolist()
+            
+            # 4. Warranty Coverage
+            warranty_query = "SELECT DISTINCT warranty_coverage FROM unified_part_logs WHERE warranty_coverage IS NOT NULL ORDER BY warranty_coverage"
+            options['warranty_coverage'] = self.loader.fetch_df(warranty_query)['warranty_coverage'].tolist()
+            
+        except Exception as e:
+            print(f"⚠️ Error loading filter options: {e}")
+            # Return empty lists on error
+            options = {k: [] for k in ['vehicle_plate', 'item_name', 'customer_type', 'warranty_coverage']}
+            
+        return options
     
     def get_cohort_data(self, vehicle_plate: str = None) -> pd.DataFrame:
         """

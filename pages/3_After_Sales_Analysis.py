@@ -92,32 +92,54 @@ st.subheader("🔍 Filter Data")
 
 # Initialize session state for filters
 if 'filter_plate' not in st.session_state:
-    st.session_state.filter_plate = ""
+    st.session_state.filter_plate = "All"
 if 'filter_item' not in st.session_state:
-    st.session_state.filter_item = ""
+    st.session_state.filter_item = "All"
 if 'filter_customer' not in st.session_state:
-    st.session_state.filter_customer = ""
+    st.session_state.filter_customer = "All"
 if 'filter_warranty' not in st.session_state:
     st.session_state.filter_warranty = "All"
 if 'current_page' not in st.session_state:
     st.session_state.current_page = 1
 
+# Load Filter Options from DB
+filter_options = {
+    'vehicle_plate': [],
+    'item_name': [],
+    'customer_type': [],
+    'warranty_coverage': []
+}
+
+if NEON_AVAILABLE:
+    try:
+        filter_options = neon_service.get_filter_options()
+    except Exception as e:
+        st.error(f"Error loading filter options: {e}")
+
 # Filter inputs
 filter_col1, filter_col2, filter_col3, filter_col4, filter_col5 = st.columns([1.5, 1.5, 1.5, 1, 0.8])
 
 with filter_col1:
-    filter_plate = st.text_input("🚗 Plat Nomor", value=st.session_state.filter_plate, placeholder="B 1234 XX", key="input_plate")
+    plate_opts = ["All"] + filter_options.get('vehicle_plate', [])
+    # Preserve selection if valid, else default to All
+    idx = plate_opts.index(st.session_state.filter_plate) if st.session_state.filter_plate in plate_opts else 0
+    filter_plate = st.selectbox("🚗 Plat Nomor", plate_opts, index=idx, key="input_plate")
 
 with filter_col2:
-    filter_item = st.text_input("📦 Item Name", value=st.session_state.filter_item, placeholder="Tire, Oil, etc", key="input_item")
+    item_opts = ["All"] + filter_options.get('item_name', [])
+    idx = item_opts.index(st.session_state.filter_item) if st.session_state.filter_item in item_opts else 0
+    filter_item = st.selectbox("📦 Item Name", item_opts, index=idx, key="input_item")
 
 with filter_col3:
-    filter_customer = st.text_input("👤 Customer Type", value=st.session_state.filter_customer, placeholder="Grab, Gojek, etc", key="input_customer")
+    cust_opts = ["All"] + filter_options.get('customer_type', [])
+    idx = cust_opts.index(st.session_state.filter_customer) if st.session_state.filter_customer in cust_opts else 0
+    filter_customer = st.selectbox("👤 Customer Type", cust_opts, index=idx, key="input_customer")
 
 with filter_col4:
-    warranty_options = ["All", "Garansi", "Non-Garansi"]
-    warranty_index = warranty_options.index(st.session_state.filter_warranty) if st.session_state.filter_warranty in warranty_options else 0
-    filter_warranty = st.selectbox("🛡️ Warranty", warranty_options, index=warranty_index, key="input_warranty")
+    # Use warranty_coverage options from DB instead of hardcoded
+    warranty_opts = ["All"] + filter_options.get('warranty_coverage', [])
+    idx = warranty_opts.index(st.session_state.filter_warranty) if st.session_state.filter_warranty in warranty_opts else 0
+    filter_warranty = st.selectbox("🛡️ Warranty", warranty_opts, index=idx, key="input_warranty")
 
 with filter_col5:
     st.markdown("<br>", unsafe_allow_html=True)
@@ -136,23 +158,23 @@ if apply_filter:
 col_clear, _ = st.columns([1, 5])
 with col_clear:
     if st.button("🗑️ Clear Filters"):
-        st.session_state.filter_plate = ""
-        st.session_state.filter_item = ""
-        st.session_state.filter_customer = ""
+        st.session_state.filter_plate = "All"
+        st.session_state.filter_item = "All"
+        st.session_state.filter_customer = "All"
         st.session_state.filter_warranty = "All"
         st.session_state.current_page = 1
         st.rerun()
 
 # Build filters dict from session state
 filters = {}
-if st.session_state.filter_plate:
+if st.session_state.filter_plate != "All":
     filters['vehicle_plate'] = st.session_state.filter_plate
-if st.session_state.filter_item:
+if st.session_state.filter_item != "All":
     filters['item_name'] = st.session_state.filter_item
-if st.session_state.filter_customer:
+if st.session_state.filter_customer != "All":
     filters['customer_type'] = st.session_state.filter_customer
-if st.session_state.filter_warranty and st.session_state.filter_warranty != "All":
-    filters['warranty_status'] = st.session_state.filter_warranty
+if st.session_state.filter_warranty != "All":
+    filters['warranty_coverage'] = st.session_state.filter_warranty
 
 # Show active filters
 if filters:
@@ -215,8 +237,13 @@ if NEON_AVAILABLE:
                     "bike_type": st.column_config.TextColumn("Bike Type"),
                     "customer_type": st.column_config.TextColumn("Customer"),
                     "quantity": st.column_config.NumberColumn("Qty", format="%.0f"),
+                    
+                    # NEW COLUMNS
+                    "subtotal_price": st.column_config.NumberColumn("Subtotal", format="Rp %.0f"),
+                    "old_price": st.column_config.NumberColumn("Wait", format="Rp %.0f"), # User asked for New Column "Wait" (Old Price) or similar? Code says "Wait" -> "Old Price"
+                    
                     "final_price": st.column_config.NumberColumn("Price", format="Rp %.0f"),
-                    "warranty_status": st.column_config.TextColumn("Warranty"),
+                    "warranty_status": st.column_config.TextColumn("Warranty Coverage"), # Renamed header
                     "pergantian_ke": st.column_config.NumberColumn("Pergantian Ke", format="%d"),
                     "odometer": st.column_config.NumberColumn("Odometer", format="%,d km")
                 }
