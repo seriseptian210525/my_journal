@@ -330,6 +330,17 @@ if NEON_AVAILABLE:
         
         # Display table
         if not df_display.empty:
+            # ENRICHMENT: Add Location Category flag
+            # Logic: If service_location_name contains "GRAB" -> 'B2B Repair', else 'Internal Repair'
+            if 'service_location_name' in df_display.columns:
+                df_display['location_category'] = np.where(
+                    df_display['service_location_name'].astype(str).str.contains('GRAB', case=False, na=False), 
+                    'B2B Repair', 
+                    'Internal Repair'
+                )
+            else:
+                df_display['location_category'] = 'Unknown'
+
             st.dataframe(
                 df_display,
                 use_container_width=True,
@@ -341,17 +352,22 @@ if NEON_AVAILABLE:
                     "vehicle_plate": st.column_config.TextColumn("Plat Nomor"),
                     "sku": st.column_config.TextColumn("SKU"),
                     "item_name": st.column_config.TextColumn("Item Name", width="large"),
+                    # NEW LOCATION COLUMNS
+                    "service_location_name": st.column_config.TextColumn("Lokasi Servis"),
+                    "location_category": st.column_config.TextColumn("Tipe Lokasi", help="Internal vs B2B (Grab)"),
+                    
                     "bike_type": st.column_config.TextColumn("Bike Type"),
                     "customer_type": st.column_config.TextColumn("Customer"),
                     "quantity": st.column_config.NumberColumn("Qty", format="%.0f"),
                     
                     # NEW COLUMNS
                     "subtotal_price": st.column_config.NumberColumn("Subtotal", format="Rp %.0f"),
-                    "old_price": st.column_config.NumberColumn("Old Price", format="Rp %.0f"), # User asked for New Column "Wait" (Old Price) or similar? Code says "Wait" -> "Old Price"
+                    "old_price": st.column_config.NumberColumn("Old Price", format="Rp %.0f"), 
                     
                     "final_price": st.column_config.NumberColumn("Price", format="Rp %.0f"),
-                    "warranty_status": st.column_config.TextColumn("Warranty Coverage"), # Renamed header
-                    "pergantian_ke": st.column_config.NumberColumn("Pergantian Ke", format="%d"),
+                    "warranty_status": st.column_config.TextColumn("Warranty Coverage"), 
+                    "pergantian_ke_total": st.column_config.NumberColumn("#Total", format="%d", help="Total pergantian seumur hidup"),
+                    "pergantian_ke_yearly": st.column_config.NumberColumn("#Yearly", format="%d", help="Pergantian dalam siklus tahun berjalan (reset tiap tahun)"),
                     "odometer": st.column_config.NumberColumn("Odometer (km)", format="%d")
                 }
             )
