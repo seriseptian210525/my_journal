@@ -28,6 +28,23 @@ class NeonLoader:
         with self.engine.connect() as conn:
             result = conn.execute(text(query)).scalar()
         return result
+    
+    def get_max_created_at_by_source(self, source_system: str, table_name: str = "unified_part_logs"):
+        """
+        Get the latest ingested timestamp for a SPECIFIC source system.
+        This allows independent tracking of Service Items vs Part Usage.
+        
+        Args:
+            source_system: 'Apps' for Service Items, 'Part Usage Sheet' for manual uploads
+        """
+        query = text(f"""
+            SELECT MAX(created_at) FROM {table_name} 
+            WHERE source_system = :source 
+            AND customer_type IS NOT NULL AND customer_type != ''
+        """)
+        with self.engine.connect() as conn:
+            result = conn.execute(query, {'source': source_system}).scalar()
+        return result
 
     def fetch_df(self, query: str, params: dict = None):
         """Fetch query results as DataFrame."""

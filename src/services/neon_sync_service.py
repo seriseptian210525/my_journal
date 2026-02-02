@@ -87,23 +87,32 @@ class NeonSyncService:
         }
         
         try:
-            # Get last sync timestamp
-            max_date = self.get_max_created_at()
-            if max_date:
-                max_date_filter = pd.to_datetime(max_date).tz_localize(None)
+            # --- PER-SOURCE TIMESTAMP TRACKING ---
+            # Get last sync timestamp for EACH source independently
+            # This ensures Service Items and Part Usage don't block each other
+            max_date_si = self.loader.get_max_created_at_by_source('Apps')
+            max_date_pu = self.loader.get_max_created_at_by_source('Part Usage Sheet')
+            
+            if max_date_si:
+                max_date_filter_si = pd.to_datetime(max_date_si).tz_localize(None)
             else:
-                max_date_filter = None
+                max_date_filter_si = None
+                
+            if max_date_pu:
+                max_date_filter_pu = pd.to_datetime(max_date_pu).tz_localize(None)
+            else:
+                max_date_filter_pu = None
             
             # Load auxiliary data
             asset_df = self.data_loader.load_gspread_data(SHEET_ID_ASSET_LIST, WORKSHEET_ASSET)
             mapping_df = self.data_loader.load_gspread_data(SHEET_ID_MAPPINGS, WORKSHEET_MAPPINGS)
             
-            # --- SERVICE ITEMS ---
+            # --- SERVICE ITEMS (Filter by SI's own max_date) ---
             raw_si = self.data_loader.load_gspread_data(SHEET_ID_SERVICE_ITEMS, WORKSHEET_SERVICE_ITEMS)
             if not raw_si.empty:
                 raw_si['created_at'] = pd.to_datetime(raw_si['created_at'], errors='coerce')
-                if max_date_filter:
-                    raw_si = raw_si[raw_si['created_at'] > max_date_filter]
+                if max_date_filter_si:
+                    raw_si = raw_si[raw_si['created_at'] > max_date_filter_si]
                 
                 if not raw_si.empty:
                     si_df = standardize_service_items(raw_si, asset_df=asset_df, mapping_df=mapping_df)
@@ -113,12 +122,12 @@ class NeonSyncService:
             else:
                 si_df = pd.DataFrame()
             
-            # --- PART USAGE ---
+            # --- PART USAGE (Filter by PU's own max_date) ---
             raw_pu = self.data_loader.load_gspread_data(SHEET_ID_OUTPUT_REVIEW, WORKSHEET_PART_USAGE)
             if not raw_pu.empty:
                 raw_pu['created_at'] = pd.to_datetime(raw_pu['created_at'], errors='coerce')
-                if max_date_filter:
-                    raw_pu = raw_pu[raw_pu['created_at'] > max_date_filter]
+                if max_date_filter_pu:
+                    raw_pu = raw_pu[raw_pu['created_at'] > max_date_filter_pu]
                 
                 if not raw_pu.empty:
                     pu_df = standardize_part_usage(raw_pu, asset_df=asset_df, mapping_df=mapping_df)
