@@ -101,6 +101,10 @@ if 'filter_end_date' not in st.session_state:
 
 if 'filter_plate' not in st.session_state:
     st.session_state.filter_plate = "All"
+if 'filter_order' not in st.session_state:
+    st.session_state.filter_order = ""
+if 'filter_location' not in st.session_state:
+    st.session_state.filter_location = "All"
 if 'filter_item' not in st.session_state:
     st.session_state.filter_item = "All"
 if 'filter_customer' not in st.session_state:
@@ -113,6 +117,8 @@ if 'filter_loc_cat' not in st.session_state:
     st.session_state.filter_loc_cat = "All"
 if 'current_page' not in st.session_state:
     st.session_state.current_page = 1
+if 'prime_page' not in st.session_state:
+    st.session_state.prime_page = 1
 
 # Load Filter Options from DB
 filter_options = {
@@ -130,7 +136,7 @@ if NEON_AVAILABLE:
         st.error(f"Error loading filter options: {e}")
 
 # --- Date Filter Section ---
-st.markdown("##### 📅 Date Filter")
+st.markdown("##### 📅 Date & Location")
 col_date_mode, col_date_input, col_loc_cat = st.columns([1, 2, 1])
 
 with col_date_mode:
@@ -144,7 +150,7 @@ with col_date_mode:
     )
 
 with col_loc_cat:
-    loc_cats = ["All", "B2B Repair", "Internal Repair"]
+    loc_cats = ["All", "B2B Repair", "Internal Repair", "Official Partner"]
     current_loc = st.session_state.filter_loc_cat
     idx = loc_cats.index(current_loc) if current_loc in loc_cats else 0
     input_loc_cat = st.selectbox("🏭 Tipe Lokasi", loc_cats, index=idx, key="input_loc_cat")
@@ -188,44 +194,59 @@ with col_date_input:
             start_date_input = datetime(selected_year, month_idx, 1)
             end_date_input = datetime(selected_year, month_idx, last_day, 23, 59, 59)
 
-# Filter inputs
-st.markdown("##### 🏷️ Category Filters")
-filter_col1, filter_col2, filter_col3, filter_col4, filter_col5, filter_col6 = st.columns([1.5, 1.5, 1.5, 1.2, 1, 0.8])
+# Filter inputs - ROW 1: Identity & Location
+st.markdown("##### 🏷️ Filters")
+row1_col1, row1_col2, row1_col3, row1_col4 = st.columns([1.5, 1.5, 2, 1.5])
 
-with filter_col1:
+with row1_col1:
     plate_opts = ["All"] + filter_options.get('vehicle_plate', [])
-    # Preserve selection if valid, else default to All
     idx = plate_opts.index(st.session_state.filter_plate) if st.session_state.filter_plate in plate_opts else 0
     filter_plate = st.selectbox("🚗 Plat Nomor", plate_opts, index=idx, key="input_plate")
 
-with filter_col2:
+with row1_col2:
+    filter_order = st.text_input("📋 Order #", value=st.session_state.filter_order, key="input_order", placeholder="Search order...")
+
+with row1_col3:
+    loc_opts = ["All"] + filter_options.get('service_location_name', [])
+    idx = loc_opts.index(st.session_state.filter_location) if st.session_state.filter_location in loc_opts else 0
+    filter_location = st.selectbox("📍 Lokasi Servis", loc_opts, index=idx, key="input_location")
+
+with row1_col4:
+    cust_opts = ["All"] + filter_options.get('customer_type', [])
+    idx = cust_opts.index(st.session_state.filter_customer) if st.session_state.filter_customer in cust_opts else 0
+    filter_customer = st.selectbox("👤 Customer", cust_opts, index=idx, key="input_customer")
+
+# Filter inputs - ROW 2: Product & Actions
+row2_col1, row2_col2, row2_col3, row2_col4, row2_col5 = st.columns([2, 1.5, 1.2, 0.6, 0.6])
+
+with row2_col1:
     item_opts = ["All"] + filter_options.get('item_name', [])
     idx = item_opts.index(st.session_state.filter_item) if st.session_state.filter_item in item_opts else 0
     filter_item = st.selectbox("📦 Item Name", item_opts, index=idx, key="input_item")
 
-with filter_col3:
-    cust_opts = ["All"] + filter_options.get('customer_type', [])
-    idx = cust_opts.index(st.session_state.filter_customer) if st.session_state.filter_customer in cust_opts else 0
-    filter_customer = st.selectbox("👤 Customer Type", cust_opts, index=idx, key="input_customer")
-
-with filter_col4:
-    # Use warranty_coverage options from DB instead of hardcoded
-    warranty_opts = ["All"] + filter_options.get('warranty_coverage', [])
-    idx = warranty_opts.index(st.session_state.filter_warranty) if st.session_state.filter_warranty in warranty_opts else 0
-    filter_warranty = st.selectbox("🛡️ Warranty", warranty_opts, index=idx, key="input_warranty")
-
-with filter_col5:
+with row2_col2:
     sku_opts = ["All"] + filter_options.get('sku', [])
     idx = sku_opts.index(st.session_state.filter_sku) if st.session_state.filter_sku in sku_opts else 0
     filter_sku = st.selectbox("🏷️ SKU", sku_opts, index=idx, key="input_sku")
 
-with filter_col6:
+with row2_col3:
+    warranty_opts = ["All"] + filter_options.get('warranty_coverage', [])
+    idx = warranty_opts.index(st.session_state.filter_warranty) if st.session_state.filter_warranty in warranty_opts else 0
+    filter_warranty = st.selectbox("🛡️ Warranty", warranty_opts, index=idx, key="input_warranty")
+
+with row2_col4:
     st.markdown("<br>", unsafe_allow_html=True)
-    apply_filter = st.button("🔍 Apply", type="primary", use_container_width=True)
+    apply_filter = st.button("🔍", type="primary", use_container_width=True, help="Apply Filters")
+
+with row2_col5:
+    st.markdown("<br>", unsafe_allow_html=True)
+    clear_filter = st.button("🗑️", use_container_width=True, help="Clear Filters")
 
 # Apply filter button logic
 if apply_filter:
     st.session_state.filter_plate = filter_plate
+    st.session_state.filter_order = filter_order
+    st.session_state.filter_location = filter_location
     st.session_state.filter_item = filter_item
     st.session_state.filter_customer = filter_customer
     st.session_state.filter_warranty = filter_warranty
@@ -240,29 +261,33 @@ if apply_filter:
     st.session_state.current_page = 1  # Reset to page 1
     st.rerun()
 
-# Clear filter button
-col_clear, _ = st.columns([1, 5])
-with col_clear:
-    if st.button("🗑️ Clear Filters"):
-        st.session_state.filter_plate = "All"
-        st.session_state.filter_item = "All"
-        st.session_state.filter_customer = "All"
-        st.session_state.filter_warranty = "All"
-        st.session_state.filter_sku = "All"
-        st.session_state.filter_loc_cat = "All"
-        
-        # Reset Date
-        st.session_state.filter_date_mode = "All Time"
-        st.session_state.filter_start_date = None
-        st.session_state.filter_end_date = None
-        
-        st.session_state.current_page = 1
-        st.rerun()
+# Clear filter button logic
+if clear_filter:
+    st.session_state.filter_plate = "All"
+    st.session_state.filter_order = ""
+    st.session_state.filter_location = "All"
+    st.session_state.filter_item = "All"
+    st.session_state.filter_customer = "All"
+    st.session_state.filter_warranty = "All"
+    st.session_state.filter_sku = "All"
+    st.session_state.filter_loc_cat = "All"
+    
+    # Reset Date
+    st.session_state.filter_date_mode = "All Time"
+    st.session_state.filter_start_date = None
+    st.session_state.filter_end_date = None
+    
+    st.session_state.current_page = 1
+    st.rerun()
 
 # Build filters dict from session state
 filters = {}
 if st.session_state.filter_plate != "All":
     filters['vehicle_plate'] = st.session_state.filter_plate
+if st.session_state.filter_order:
+    filters['order_number'] = st.session_state.filter_order
+if st.session_state.filter_location != "All":
+    filters['service_location_name'] = st.session_state.filter_location
 if st.session_state.filter_item != "All":
     filters['item_name'] = st.session_state.filter_item
 if st.session_state.filter_customer != "All":
@@ -342,13 +367,23 @@ if NEON_AVAILABLE:
         
         # Display table
         if not df_display.empty:
-            # ENRICHMENT: Add Location Category flag
-            # Logic: If service_location_name contains "GRAB" -> 'B2B Repair', else 'Internal Repair'
+            # ENRICHMENT: Add Location Category flag (3-Tier)
+            # B2B = Grab, Internal = Pondok Indah/Kembangan/Depok/Bekasi, else Official Partner
             if 'service_location_name' in df_display.columns:
+                loc_col = df_display['service_location_name'].astype(str)
+                
+                # Check conditions
+                is_b2b = loc_col.str.contains('GRAB', case=False, na=False)
+                is_internal = (
+                    loc_col.str.contains('Pondok Indah', case=False, na=False) |
+                    loc_col.str.contains('Kembangan', case=False, na=False) |
+                    loc_col.str.contains('Depok', case=False, na=False) |
+                    loc_col.str.contains('Bekasi', case=False, na=False)
+                )
+                
                 df_display['location_category'] = np.where(
-                    df_display['service_location_name'].astype(str).str.contains('GRAB', case=False, na=False), 
-                    'B2B Repair', 
-                    'Internal Repair'
+                    is_b2b, 'B2B Repair',
+                    np.where(is_internal, 'Internal Repair', 'Official Partner')
                 )
             else:
                 df_display['location_category'] = 'Unknown'
@@ -390,6 +425,118 @@ if NEON_AVAILABLE:
         st.error(f"Error loading data: {e}")
 else:
     st.warning("Connect to Neon to view data")
+
+# =============================================================================
+# PRIME INPUT TABLE (GEL + Internal Repair + NOT_COVERED)
+# =============================================================================
+st.markdown("---")
+st.subheader("🎯 Prime Input Queue")
+st.caption("Data yang perlu diinput manual: **Internal Repair** + **GEL** + **NOT_COVERED**")
+
+if NEON_AVAILABLE:
+    try:
+        from src.services.prime_tracking_service import PrimeTrackingService
+        prime_service = PrimeTrackingService()
+        
+        # Pre-filter for Prime Input candidates
+        prime_filters = {
+            'customer_type': 'GEL',
+            'warranty_coverage': 'NOT_COVERED',
+            'location_category': 'Internal Repair'
+        }
+        
+        # Add date filters if set
+        if st.session_state.filter_date_mode != "All Time":
+            if st.session_state.filter_start_date:
+                prime_filters['start_date'] = st.session_state.filter_start_date
+            if st.session_state.filter_end_date:
+                prime_filters['end_date'] = st.session_state.filter_end_date
+        
+        prime_df, prime_count = neon_service.get_data_for_display(
+            filters=prime_filters,
+            page=st.session_state.prime_page,
+            page_size=25
+        )
+        
+        # Stats
+        prime_stats = prime_service.get_stats()
+        stat_col1, stat_col2, stat_col3 = st.columns(3)
+        with stat_col1:
+            st.metric("Total Queue", prime_count)
+        with stat_col2:
+            st.metric("✅ Sudah Input", prime_stats['total_primed'])
+        with stat_col3:
+            st.metric("⏳ Belum Input", prime_stats['total_pending'])
+        
+        if not prime_df.empty:
+            # Get primed status for current batch
+            primed_map = prime_service.get_primed_status_bulk(
+                prime_df[['order_number', 'sku', 'vehicle_plate']].to_dict('records')
+            )
+            
+            # Add checkbox column
+            prime_df['is_primed'] = prime_df.apply(
+                lambda r: primed_map.get(f"{r['order_number']}|{r['sku']}|{r['vehicle_plate']}", False),
+                axis=1
+            )
+            
+            # Display with checkboxes (using data_editor for interactivity)
+            edited_df = st.data_editor(
+                prime_df[['is_primed', 'created_at', 'order_number', 'vehicle_plate', 'sku', 'item_name', 'service_location_name', 'final_price']],
+                column_config={
+                    "is_primed": st.column_config.CheckboxColumn("✅ Input?", default=False),
+                    "created_at": st.column_config.DatetimeColumn("Date", format="YYYY-MM-DD HH:mm"),
+                    "order_number": st.column_config.TextColumn("Order #"),
+                    "vehicle_plate": st.column_config.TextColumn("Plat"),
+                    "sku": st.column_config.TextColumn("SKU"),
+                    "item_name": st.column_config.TextColumn("Item"),
+                    "service_location_name": st.column_config.TextColumn("Lokasi"),
+                    "final_price": st.column_config.NumberColumn("Price", format="Rp %.0f"),
+                },
+                disabled=['created_at', 'order_number', 'vehicle_plate', 'sku', 'item_name', 'service_location_name', 'final_price'],
+                hide_index=True,
+                use_container_width=True,
+                key="prime_editor"
+            )
+            
+            # Save button for changes
+            if st.button("💾 Save Prime Status", type="primary"):
+                changes_made = 0
+                for idx, row in edited_df.iterrows():
+                    orig_row = prime_df.iloc[idx]
+                    if row['is_primed'] != orig_row['is_primed']:
+                        prime_service.set_primed(
+                            order_number=orig_row['order_number'],
+                            sku=orig_row['sku'],
+                            vehicle_plate=orig_row['vehicle_plate'],
+                            is_primed=row['is_primed']
+                        )
+                        changes_made += 1
+                
+                if changes_made > 0:
+                    st.success(f"✅ Saved {changes_made} changes!")
+                    st.rerun()
+                else:
+                    st.info("No changes to save.")
+            
+            # Pagination for Prime table
+            prime_total_pages = max(1, (prime_count + 24) // 25)
+            pcol1, pcol2, pcol3 = st.columns([1, 2, 1])
+            with pcol1:
+                if st.button("⬅️ Prev", disabled=st.session_state.prime_page <= 1, key="prime_prev"):
+                    st.session_state.prime_page -= 1
+                    st.rerun()
+            with pcol2:
+                st.markdown(f"<center>Page **{st.session_state.prime_page}** of **{prime_total_pages}**</center>", unsafe_allow_html=True)
+            with pcol3:
+                if st.button("Next ➡️", disabled=st.session_state.prime_page >= prime_total_pages, key="prime_next"):
+                    st.session_state.prime_page += 1
+                    st.rerun()
+        else:
+            st.success("🎉 Tidak ada data yang perlu diinput!")
+            
+    except Exception as e:
+        st.error(f"Error loading Prime Input data: {e}")
 
 # =============================================================================
 # CHARTS SECTION

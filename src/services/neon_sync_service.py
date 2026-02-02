@@ -265,6 +265,14 @@ class NeonSyncService:
                 where_clauses.append("vehicle_plate = :plate")
                 params['plate'] = filters['vehicle_plate']
             
+            if filters.get('order_number'):
+                where_clauses.append("order_number ILIKE :order")
+                params['order'] = f"%{filters['order_number']}%"
+            
+            if filters.get('service_location_name') and filters['service_location_name'] != 'All':
+                where_clauses.append("service_location_name = :location")
+                params['location'] = filters['service_location_name']
+            
             if filters.get('item_name') and filters['item_name'] != 'All':
                 where_clauses.append("item_name = :item")
                 params['item'] = filters['item_name']
@@ -290,13 +298,27 @@ class NeonSyncService:
                 where_clauses.append("created_at <= :end_date")
                 params['end_date'] = filters['end_date']
             
-            # Location Category Filter (Derived from service_location_name)
+            # Location Category Filter (3-Tier: B2B / Internal / Official Partner)
+            # Internal = Pondok Indah, Kembangan, Depok, Bekasi
             if filters.get('location_category'):
                 cat = filters['location_category']
                 if cat == 'B2B Repair':
                     where_clauses.append("service_location_name ILIKE '%GRAB%'")
                 elif cat == 'Internal Repair':
-                    where_clauses.append("(service_location_name NOT ILIKE '%GRAB%' OR service_location_name IS NULL)")
+                    where_clauses.append("""(
+                        service_location_name ILIKE '%Pondok Indah%' OR
+                        service_location_name ILIKE '%Kembangan%' OR
+                        service_location_name ILIKE '%Depok%' OR
+                        service_location_name ILIKE '%Bekasi%'
+                    )""")
+                elif cat == 'Official Partner':
+                    where_clauses.append("""(
+                        service_location_name NOT ILIKE '%GRAB%'
+                        AND service_location_name NOT ILIKE '%Pondok Indah%'
+                        AND service_location_name NOT ILIKE '%Kembangan%'
+                        AND service_location_name NOT ILIKE '%Depok%'
+                        AND service_location_name NOT ILIKE '%Bekasi%'
+                    )""")
         
         where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
         
@@ -351,10 +373,14 @@ class NeonSyncService:
             sku_query = "SELECT DISTINCT sku FROM unified_part_logs WHERE sku IS NOT NULL ORDER BY sku"
             options['sku'] = self.loader.fetch_df(sku_query)['sku'].tolist()
             
+            # 6. Service Location
+            loc_query = "SELECT DISTINCT service_location_name FROM unified_part_logs WHERE service_location_name IS NOT NULL ORDER BY service_location_name"
+            options['service_location_name'] = self.loader.fetch_df(loc_query)['service_location_name'].tolist()
+            
         except Exception as e:
             print(f"⚠️ Error loading filter options: {e}")
             # Return empty lists on error
-            options = {k: [] for k in ['vehicle_plate', 'item_name', 'customer_type', 'warranty_coverage', 'sku']}
+            options = {k: [] for k in ['vehicle_plate', 'item_name', 'customer_type', 'warranty_coverage', 'sku', 'service_location_name']}
             
         return options
     
