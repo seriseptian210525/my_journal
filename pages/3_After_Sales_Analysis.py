@@ -399,81 +399,85 @@ with chart_tab1:
             df_plate = cohort_df[cohort_df['vehicle_plate'] == selected_plate].copy()
             
             if not df_plate.empty:
-                # 2. OCCURRENCE SEQUENCE LOGIC (Time-based rank)
-                # Sort by item and time
+                # 2. SEQUENCE LOGIC FOR HEATMAP COLUMNS
+                # Use TIME-BASED Rank for X-Axis (Visual Sequence) to handle gaps gracefully
                 df_plate = df_plate.sort_values(['item_name', 'created_at'])
+                df_plate['visual_rank'] = df_plate.groupby('item_name').cumcount() + 1
                 
-                # Create 'Ke-X' sequence based on actual occurrence order
-                df_plate['occurrence_rank'] = df_plate.groupby('item_name').cumcount() + 1
-                
-                # 3. PIVOT (Values = Odometer)
-                # We format Odometer as string with thousands separator for readability
+                # 3. PIVOT: Data Values = Odometer
                 df_plate['odometer_fmt'] = df_plate['odometer'].apply(lambda x: f"{x:,.0f}" if pd.notnull(x) else "-")
                 
-                # Pivot: Index=Item, Col=Rank, Val=Odometer
                 pivot = df_plate.pivot_table(
                     index='item_name', 
-                    columns='occurrence_rank', 
+                    columns='visual_rank', 
                     values='odometer_fmt', 
                     aggfunc='first'
                 ).fillna("")
                 
-                # Pivot for Styling (Logic Checks)
-                # We need the underlying data to know when to highlight
-                # We create a parallel pivot for 'warranty_coverage' and 'pergantian_ke'
+                # 4. PIVOT: Context for Styling (Warranty & Reset Detection)
+                # Pivot Warranty Coverage
                 pivot_warranty = df_plate.pivot_table(
-                    index='item_name', columns='occurrence_rank', values='warranty_coverage', aggfunc='first'
-                )
-                pivot_ke = df_plate.pivot_table(
-                    index='item_name', columns='occurrence_rank', values='pergantian_ke', aggfunc='first'
+                    index='item_name', columns='visual_rank', values='warranty_coverage', aggfunc='first'
                 )
                 
-                # 4. DATA DISPLAY & STYLING
-                def highlight_cells(val):
-                    return 'background-color: transparent' # Default
-                    
+                # Pivot Yearly Counter (To detect Reset: 1 after >1)
+                pivot_yearly = df_plate.pivot_table(
+                    index='item_name', columns='visual_rank', values='pergantian_ke_yearly', aggfunc='first'
+                )
+
+                # Pivot Total Counter (For Tooltip/Info - Optional, currently not displayed in cell but good for logic)
+                pivot_total = df_plate.pivot_table(
+                   index='item_name', columns='visual_rank', values='pergantian_ke_total', aggfunc='first'
+                )
+                
+                # 5. DATA DISPLAY & STYLING
                 def apply_heatmap_style(df_view):
-                    # Create styling dataframe (same shape as display df)
                     df_style = pd.DataFrame('', index=df_view.index, columns=df_view.columns)
-                    
                     try:
-                        # Iterate to check conditions
                         for idx in df_style.index:
                             for col in df_style.columns:
                                 style = ''
-                                # Condition 1: Package Service
+                                # Logic: Highlight if Package Service OR Reset Cycle Detected
+                                
+                                # Check Warranty Coverage
+                                is_package = False
                                 if idx in pivot_warranty.index and col in pivot_warranty.columns:
                                     coverage = pivot_warranty.loc[idx, col]
                                     if coverage == 'PACKAGE_SERVICE':
-                                        style = 'background-color: #FFD700; color: black; font-weight: bold' # Gold
+                                        is_package = True
                                 
-                                # Condition 2: Reset Detection (Current 'Ke' < Previous 'Ke')
-                                # Logic: Check pivot_ke. If rank 3 has pergantian_ke=1, it means reset.
-                                # But since we use occurrence_rank as cols, we can just check if pergantian_ke == 1 and rank > 1?
-                                # Or simpler: if warranty says PACKAGE_SERVICE it's usually a reset point.
-                                # Let's rely on package_service + reset check
-                                if idx in pivot_ke.index and col in pivot_ke.columns:
-                                        curr_ke = pivot_ke.loc[idx, col]
-                                        # If rank > 1 but pergantian_ke is 1, it's a reset
-                                        if isinstance(col, int) and col > 1 and curr_ke == 1:
-                                            style = 'background-color: #FFD700; color: black; font-weight: bold'
-                                            
+                                # Check Reset Cycle (Yearly Counter == 1 but it's not the first global occurrence)
+                                is_reset = False
+                                if idx in pivot_yearly.index and col in pivot_yearly.columns:
+                                    yearly_counter = pivot_yearly.loc[idx, col]
+                                    
+                                    # If yearly counter is 1, AND it's not the very first visual rank (1), it's likely a reset
+                                    # OR check against Total Counter: if Total > 1 and Yearly == 1
+                                    if idx in pivot_total.index and col in pivot_total.columns:
+                                        total_counter = pivot_total.loc[idx, col]
+                                        if total_counter > 1 and yearly_counter == 1:
+                                            is_reset = True
+                                
+                                if is_package or is_reset:
+                                    style = 'background-color: #FFD700; color: black; font-weight: bold' # Gold
+                                    
                                 df_style.loc[idx, col] = style
                     except Exception as e:
-                        pass # Fallback to no style on error
-                        
+                        pass
                     return df_style
 
                 # Apply style
-                # Note: Styler apply only works if indices match.
                 st.dataframe(
                     pivot.style.apply(apply_heatmap_style, axis=None),
                     use_container_width=True,
                     column_config={
-                        str(c): st.column_config.Column(f"Ke-{c}", width="small") 
+                        str(c): st.column_config.Column(f"#{c}", width="small") 
                         for c in pivot.columns
                     }
                 )
+                
+                # Legend / Info
+                st.caption("Keterangan: Kolom #1, #2, dst adalah urutan kejadian berdasarkan waktu. Warna Emas menandakan Paket Servis atau Reset Siklus Garansi (Tahun Baru).")
                 
             else:
                 st.info(f"No data found for vehicle {selected_plate} in this period.")
