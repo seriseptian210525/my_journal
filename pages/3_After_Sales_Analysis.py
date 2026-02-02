@@ -437,9 +437,9 @@ with st.expander("🎯 Prime Input Queue", expanded=False):
     if NEON_AVAILABLE:
         try:
             from src.services.prime_tracking_service import PrimeTrackingService
-            # Use same connection string from secrets
-            conn_str = st.secrets.get("NEON_DB_CONNECTION_STRING")
-            prime_service = PrimeTrackingService(connection_string=conn_str)
+            from src.common.config import NEON_DB_CONNECTION_STRING
+            # Use same connection string as NeonLoader
+            prime_service = PrimeTrackingService(connection_string=NEON_DB_CONNECTION_STRING)
             
             # Pre-filter for Prime Input candidates
             prime_filters = {
