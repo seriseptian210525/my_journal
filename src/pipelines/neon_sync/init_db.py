@@ -10,7 +10,7 @@ sys.path.append(str(project_root))
 from src.pipelines.neon_sync.loader import NeonLoader
 
 def init_db():
-    print("🚀 Initializing Neon Database (Final Schema)...")
+    print("🚀 Initializing Neon Database (Enhanced Schema with Warranty)...")
     
     try:
         loader = NeonLoader()
@@ -19,7 +19,7 @@ def init_db():
         print("   ⚠️ Dropping existing table `unified_part_logs`...")
         loader.execute_query("DROP TABLE IF EXISTS unified_part_logs CASCADE;")
         
-        # DDL: Create Table
+        # DDL: Create Table with Enhanced Schema
         create_table_query = """
         CREATE TABLE IF NOT EXISTS unified_part_logs (
             id SERIAL PRIMARY KEY,
@@ -37,15 +37,15 @@ def init_db():
             item_type VARCHAR(50),
             service_type VARCHAR(50),
             service_location_name VARCHAR(100),
-            completed_by VARCHAR(100), -- price_finalized_by_name
+            completed_by VARCHAR(100),
             customer_type VARCHAR(100),
             
             -- Metrics
             quantity NUMERIC(10, 2),
-            unit_price NUMERIC(15, 2), -- Base Price
+            unit_price NUMERIC(15, 2),
             final_price NUMERIC(15, 2),
-            subtotal_price NUMERIC(15, 2), -- Total Price
-            old_price NUMERIC(15, 2), -- Landed Price from Mappings
+            subtotal_price NUMERIC(15, 2),
+            old_price NUMERIC(15, 2),
             
             -- Status & Context
             warranty_status VARCHAR(50),
@@ -53,20 +53,22 @@ def init_db():
             odometer INTEGER,
             bike_type VARCHAR(50),
             
-            -- Calculated
-            pergantian_ke INTEGER,
+            -- NEW: Warranty Calculation Fields
+            delivery_date DATE,                    -- From Asset List
+            bulan_ke INTEGER DEFAULT 0,            -- Months since delivery
+            year_cycle INTEGER DEFAULT 0,          -- bulan_ke // 12
+            customer_category VARCHAR(50),         -- PARTNER_USER / ELECTRUM_USER
+            warranty_type VARCHAR(50),             -- From Mappings
+            covered_for VARCHAR(255),              -- From Mappings
+            limit_per_year INTEGER DEFAULT 0,      -- From Mappings
+            pergantian_ke INTEGER DEFAULT 1,       -- Cumulative per vehicle+sku+year_cycle
+            warranty_coverage VARCHAR(50),         -- Final calculated warranty status
             
             -- System Metadata
             ingested_at TIMESTAMP DEFAULT NOW(),
             
-            -- Unique Key for Deduplication (Composite)
-            -- Note: 'pergantian_ke' is calculated, so it's part of the uniqueness of the event effectively
-            -- But for raw data, source + order + sku + item name might be better?
-            -- Actually, if we explode rows, we need a way to distinguish them.
-            -- We might rely on ID or just loose constraints for now.
-            -- Let's keep a flexible unique constraint if possible, or none if full refresh.
-            -- Removing constraint for now to allow full refresh flexibility.
-            CONSTRAINT unique_log_entry UNIQUE(source_system, order_number, sku, item_name, pergantian_ke)
+            -- Unique Key for Deduplication (includes year_cycle for proper reset)
+            CONSTRAINT unique_log_entry UNIQUE(source_system, order_number, sku, item_name, year_cycle, pergantian_ke)
         );
         """
         
@@ -79,17 +81,76 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_order_number ON unified_part_logs(order_number);",
             "CREATE INDEX IF NOT EXISTS idx_created_at ON unified_part_logs(created_at);",
             "CREATE INDEX IF NOT EXISTS idx_sku ON unified_part_logs(sku);",
-            "CREATE INDEX IF NOT EXISTS idx_vehicle_plate ON unified_part_logs(vehicle_plate);"
+            "CREATE INDEX IF NOT EXISTS idx_vehicle_plate ON unified_part_logs(vehicle_plate);",
+            "CREATE INDEX IF NOT EXISTS idx_year_cycle ON unified_part_logs(year_cycle);",
+            "CREATE INDEX IF NOT EXISTS idx_customer_category ON unified_part_logs(customer_category);",
+            "CREATE INDEX IF NOT EXISTS idx_warranty_coverage ON unified_part_logs(warranty_coverage);"
         ]
         
         for idx in indexes:
             loader.execute_query(idx)
             
-        print("✅ Database Table `unified_part_logs` is ready!")
+        print("✅ Database Table `unified_part_logs` is ready with enhanced schema!")
         
     except Exception as e:
         print(f"❌ Failed to initialize database: {e}")
         raise e
 
+
+def alter_existing_table():
+    """
+    Alternative: Add new columns to existing table without dropping.
+    Use this if you want to preserve existing data.
+    """
+    print("🔧 Altering existing table (adding new columns)...")
+    
+    try:
+        loader = NeonLoader()
+        
+        alter_queries = [
+            "ALTER TABLE unified_part_logs ADD COLUMN IF NOT EXISTS delivery_date DATE;",
+            "ALTER TABLE unified_part_logs ADD COLUMN IF NOT EXISTS bulan_ke INTEGER DEFAULT 0;",
+            "ALTER TABLE unified_part_logs ADD COLUMN IF NOT EXISTS year_cycle INTEGER DEFAULT 0;",
+            "ALTER TABLE unified_part_logs ADD COLUMN IF NOT EXISTS customer_category VARCHAR(50);",
+            "ALTER TABLE unified_part_logs ADD COLUMN IF NOT EXISTS warranty_type VARCHAR(50);",
+            "ALTER TABLE unified_part_logs ADD COLUMN IF NOT EXISTS covered_for VARCHAR(255);",
+            "ALTER TABLE unified_part_logs ADD COLUMN IF NOT EXISTS limit_per_year INTEGER DEFAULT 0;",
+            "ALTER TABLE unified_part_logs ADD COLUMN IF NOT EXISTS warranty_coverage VARCHAR(50);",
+        ]
+        
+        for query in alter_queries:
+            print(f"   Executing: {query[:50]}...")
+            loader.execute_query(query)
+        
+        # Drop old constraint and add new one
+        print("   Updating unique constraint...")
+        loader.execute_query("ALTER TABLE unified_part_logs DROP CONSTRAINT IF EXISTS unique_log_entry;")
+        loader.execute_query("""
+            ALTER TABLE unified_part_logs 
+            ADD CONSTRAINT unique_log_entry 
+            UNIQUE(source_system, order_number, sku, item_name, year_cycle, pergantian_ke);
+        """)
+        
+        # Add new indexes
+        print("   Adding new indexes...")
+        loader.execute_query("CREATE INDEX IF NOT EXISTS idx_year_cycle ON unified_part_logs(year_cycle);")
+        loader.execute_query("CREATE INDEX IF NOT EXISTS idx_customer_category ON unified_part_logs(customer_category);")
+        loader.execute_query("CREATE INDEX IF NOT EXISTS idx_warranty_coverage ON unified_part_logs(warranty_coverage);")
+        
+        print("✅ Table altered successfully!")
+        
+    except Exception as e:
+        print(f"❌ Failed to alter table: {e}")
+        raise e
+
+
 if __name__ == "__main__":
-    init_db()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--alter', action='store_true', help='Alter existing table instead of recreating')
+    args = parser.parse_args()
+    
+    if args.alter:
+        alter_existing_table()
+    else:
+        init_db()

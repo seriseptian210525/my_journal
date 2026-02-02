@@ -14,7 +14,8 @@ from src.pipelines.neon_sync.transformers import (
     standardize_service_items, 
     standardize_part_usage,
     explode_rows,
-    calculate_pergantian_ke
+    calculate_pergantian_ke,
+    calculate_warranty_coverage  # NEW
 )
 from src.common.data_loader import DataLoader
 from src.common.config import (
@@ -25,6 +26,14 @@ from src.common.config import (
 )
 
 def run_pipeline():
+    """
+    Main Neon Sync Pipeline with Warranty Recalculation.
+    
+    Modes:
+    - full: Truncate + Full refresh with warranty recalculation
+    - incremental: Append new data only (with warranty calc)
+    - recalculate: Re-calculate warranty for existing data (upsert)
+    """
     # Read Pipeline Mode from Environment (default: full)
     pipeline_mode = os.getenv('PIPELINE_MODE', 'full').lower()
     
@@ -35,12 +44,12 @@ def run_pipeline():
     # --- 0. PRELOAD AUXILIARY DATA (Enrichment Sources) ---
     print("\n📚 Loading Auxiliary Data...")
     
-    # Asset List (for Customer Type)
+    # Asset List (for Customer Type + Delivery Date)
     print("   Fetching Asset List...")
     asset_df = dl.load_gspread_data(SHEET_ID_ASSET_LIST, WORKSHEET_ASSET)
     print(f"   Shape: {asset_df.shape}")
     
-    # Mappings (for Old Price)
+    # Mappings (for Old Price + Warranty Config)
     print("   Fetching Mappings...")
     mapping_df = dl.load_gspread_data(SHEET_ID_MAPPINGS, WORKSHEET_MAPPINGS)
     print(f"   Shape: {mapping_df.shape}")
@@ -116,48 +125,84 @@ def run_pipeline():
     exploded_df = explode_rows(unified_df)
     print(f"   Post-Explosion Total: {len(exploded_df)} rows.")
     
-    # Sort for Pergantian Ke calculation
-    print("   Sorting for Calculation...")
+    # Sort by created_at (ASC) to ensure chronological order for warranty calculation
+    print("   Sorting by created_at (ASC)...")
     exploded_df['created_at'] = pd.to_datetime(exploded_df['created_at'])
-    exploded_df.sort_values(by=['vehicle_plate', 'sku', 'created_at'], inplace=True)
+    exploded_df.sort_values(by='created_at', ascending=True, inplace=True)
     
-    # Calculate Pergantian Ke
-    # NOTE: For Incremental mode, this calculation is LOCAL to the new batch only.
-    # For accurate cumulative counting, use FULL mode.
-    print("   🧮 Calculating 'Pergantian Ke'...")
-    final_df = calculate_pergantian_ke(exploded_df)
+    # --- 4. WARRANTY RECALCULATION (NEW) ---
+    print("\n🛡️ Calculating Warranty Coverage...")
+    enriched_df = calculate_warranty_coverage(exploded_df, asset_df=asset_df, mapping_df=mapping_df)
+    print(f"   Enriched Total: {len(enriched_df)} rows.")
+    
+    # Sample Check
+    if not enriched_df.empty:
+        sample = enriched_df[['vehicle_plate', 'sku', 'customer_category', 'bulan_ke', 'year_cycle', 'pergantian_ke', 'warranty_coverage']].head(5)
+        print(f"   Sample Enriched Data:\n{sample}")
+    
+    # --- 5. PREPARE FINAL COLUMNS ---
+    print("\n📝 Preparing Final Columns...")
+    
+    # Ensure all required columns exist
+    final_columns = [
+        'source_system', 'created_at', 'order_number', 'vehicle_plate', 'sku', 'item_name', 'erp_product_id',
+        'item_type', 'service_type', 'service_location_name', 'completed_by', 'customer_type',
+        'quantity', 'unit_price', 'final_price', 'subtotal_price', 'old_price',
+        'warranty_status', 'status', 'odometer', 'bike_type',
+        # NEW warranty columns
+        'delivery_date', 'bulan_ke', 'year_cycle', 'customer_category',
+        'warranty_type', 'covered_for', 'limit_per_year', 'pergantian_ke', 'warranty_coverage'
+    ]
+    
+    # Add missing columns with defaults
+    for col in final_columns:
+        if col not in enriched_df.columns:
+            enriched_df[col] = None
+    
+    final_df = enriched_df[final_columns].copy()
     
     # DEDUPLICATION: Remove duplicates based on unique constraint columns
-    key_cols = ['source_system', 'order_number', 'sku', 'item_name', 'pergantian_ke']
+    key_cols = ['source_system', 'order_number', 'sku', 'item_name', 'year_cycle', 'pergantian_ke']
     before_dedup = len(final_df)
     final_df = final_df.drop_duplicates(subset=key_cols, keep='first')
     after_dedup = len(final_df)
     if before_dedup != after_dedup:
         print(f"   🔄 Deduplicated: {before_dedup} → {after_dedup} (removed {before_dedup - after_dedup})")
-    
-    # Sample Check
-    if not final_df.empty:
-        sample = final_df[['vehicle_plate', 'sku', 'pergantian_ke']].head(5)
-        print(f"   Sample Calc:\n{sample}")
 
-    # --- 4. LOAD TO NEON ---
+    # SORT GLOBAL BY CREATED_AT (ASC)
+    # Ensure ID 1 corresponds to earliest date (2024)
+    print("   Sorting globally by created_at (ASC) for ID sequence...")
+    final_df.sort_values(by='created_at', ascending=True, inplace=True)
+
+    # --- 6. LOAD TO NEON ---
     print("\n💾 Loading to Neon...")
     
     try:
         if pipeline_mode == 'full':
             # FULL REFRESH: Truncate + Insert
-            loader.execute_query("TRUNCATE TABLE unified_part_logs;")
-            print("   Truncated target table (Full Refresh).")
+            loader.truncate_table('unified_part_logs')
+            loader.load_df_append(final_df, 'unified_part_logs')
+            print(f"   ✅ Full refresh completed: {len(final_df)} rows loaded.")
+            
+        elif pipeline_mode == 'recalculate':
+            # RECALCULATE: Upsert (update existing + insert new)
+            print("   Using UPSERT for recalculation...")
+            loader.upsert_df(final_df, 'unified_part_logs')
+            print(f"   ✅ Recalculation completed: {len(final_df)} rows upserted.")
+            
         else:
             # INCREMENTAL: Append only (no truncate)
             print("   Appending new data (Incremental)...")
+            loader.load_df_append(final_df, 'unified_part_logs')
+            print(f"   ✅ Incremental load completed: {len(final_df)} rows appended.")
         
-        # Load Data
-        loader.load_df_append(final_df, 'unified_part_logs')
-        print(f"   ✅ Successfully loaded {len(final_df)} rows to Neon.")
+        # Show final row count
+        total_rows = loader.get_row_count('unified_part_logs')
+        print(f"   📊 Total rows in Neon: {total_rows}")
         
     except Exception as e:
         print(f"❌ Error Loading to Neon: {e}")
+        raise e
         
     print("\n✨ Pipeline Finished.")
 
