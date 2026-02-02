@@ -329,214 +329,217 @@ if filters:
 # PAGINATED DATA TABLE
 # =============================================================================
 st.markdown("---")
-st.subheader("📋 Service History")
 
-if NEON_AVAILABLE:
-    # Pagination controls
-    page_size = st.selectbox("Rows per page", [25, 50, 100], index=1, key="page_size_select")
-    
-    # Get data
-    try:
-        df_display, total_count = neon_service.get_data_for_display(
-            filters=filters if filters else None,
-            page=st.session_state.current_page,
-            page_size=page_size
-        )
+with st.expander("📋 Service History", expanded=True):
+    if NEON_AVAILABLE:
+        # Pagination controls
+        page_size = st.selectbox("Rows per page", [25, 50, 100], index=1, key="page_size_select")
         
-        total_pages = max(1, math.ceil(total_count / page_size))
-        
-        # Ensure current_page is within bounds
-        if st.session_state.current_page > total_pages:
-            st.session_state.current_page = total_pages
-        
-        # Pagination UI
-        col_prev, col_info, col_next = st.columns([1, 2, 1])
-        
-        with col_prev:
-            if st.button("⬅️ Previous", disabled=st.session_state.current_page <= 1, key="btn_prev"):
-                st.session_state.current_page -= 1
-                st.rerun()
-        
-        with col_info:
-            st.markdown(f"<center>Page **{st.session_state.current_page}** of **{total_pages}** ({total_count:,} records)</center>", unsafe_allow_html=True)
-        
-        with col_next:
-            if st.button("Next ➡️", disabled=st.session_state.current_page >= total_pages, key="btn_next"):
-                st.session_state.current_page += 1
-                st.rerun()
-        
-        # Display table
-        if not df_display.empty:
-            # ENRICHMENT: Add Location Category flag (3-Tier)
-            # B2B = Grab, Internal = Pondok Indah/Kembangan/Depok/Bekasi, else Official Partner
-            if 'service_location_name' in df_display.columns:
-                loc_col = df_display['service_location_name'].astype(str)
-                
-                # Check conditions
-                is_b2b = loc_col.str.contains('GRAB', case=False, na=False)
-                is_internal = (
-                    loc_col.str.contains('Pondok Indah', case=False, na=False) |
-                    loc_col.str.contains('Kembangan', case=False, na=False) |
-                    loc_col.str.contains('Depok', case=False, na=False) |
-                    loc_col.str.contains('Bekasi', case=False, na=False)
-                )
-                
-                df_display['location_category'] = np.where(
-                    is_b2b, 'B2B Repair',
-                    np.where(is_internal, 'Internal Repair', 'Official Partner')
+        # Get data
+        try:
+            df_display, total_count = neon_service.get_data_for_display(
+                filters=filters if filters else None,
+                page=st.session_state.current_page,
+                page_size=page_size
+            )
+            
+            total_pages = max(1, math.ceil(total_count / page_size))
+            
+            # Ensure current_page is within bounds
+            if st.session_state.current_page > total_pages:
+                st.session_state.current_page = total_pages
+            
+            # Pagination UI
+            col_prev, col_info, col_next = st.columns([1, 2, 1])
+            
+            with col_prev:
+                if st.button("⬅️ Previous", disabled=st.session_state.current_page <= 1, key="btn_prev"):
+                    st.session_state.current_page -= 1
+                    st.rerun()
+            
+            with col_info:
+                st.markdown(f"<center>Page **{st.session_state.current_page}** of **{total_pages}** ({total_count:,} records)</center>", unsafe_allow_html=True)
+            
+            with col_next:
+                if st.button("Next ➡️", disabled=st.session_state.current_page >= total_pages, key="btn_next"):
+                    st.session_state.current_page += 1
+                    st.rerun()
+            
+            # Display table
+            if not df_display.empty:
+                # ENRICHMENT: Add Location Category flag (3-Tier)
+                # B2B = Grab, Internal = Pondok Indah/Kembangan/Depok/Bekasi, else Official Partner
+                if 'service_location_name' in df_display.columns:
+                    loc_col = df_display['service_location_name'].astype(str)
+                    
+                    # Check conditions
+                    is_b2b = loc_col.str.contains('GRAB', case=False, na=False)
+                    is_internal = (
+                        loc_col.str.contains('Pondok Indah', case=False, na=False) |
+                        loc_col.str.contains('Kembangan', case=False, na=False) |
+                        loc_col.str.contains('Depok', case=False, na=False) |
+                        loc_col.str.contains('Bekasi', case=False, na=False)
+                    )
+                    
+                    df_display['location_category'] = np.where(
+                        is_b2b, 'B2B Repair',
+                        np.where(is_internal, 'Internal Repair', 'Official Partner')
+                    )
+                else:
+                    df_display['location_category'] = 'Unknown'
+
+                st.dataframe(
+                    df_display,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "created_at": st.column_config.DatetimeColumn("Date", format="YYYY-MM-DD HH:mm"),
+                        "source_system": st.column_config.TextColumn("Source"),
+                        "order_number": st.column_config.TextColumn("Order #", width="medium"),
+                        "vehicle_plate": st.column_config.TextColumn("Plat Nomor"),
+                        "sku": st.column_config.TextColumn("SKU"),
+                        "item_name": st.column_config.TextColumn("Item Name", width="large"),
+                        # NEW LOCATION COLUMNS
+                        "service_location_name": st.column_config.TextColumn("Lokasi Servis"),
+                        "location_category": st.column_config.TextColumn("Tipe Lokasi", help="Internal vs B2B (Grab)"),
+                        
+                        "bike_type": st.column_config.TextColumn("Bike Type"),
+                        "customer_type": st.column_config.TextColumn("Customer"),
+                        "quantity": st.column_config.NumberColumn("Qty", format="%.0f"),
+                        
+                        # NEW COLUMNS
+                        "subtotal_price": st.column_config.NumberColumn("Subtotal", format="Rp %.0f"),
+                        "old_price": st.column_config.NumberColumn("Old Price", format="Rp %.0f"), 
+                        
+                        "final_price": st.column_config.NumberColumn("Price", format="Rp %.0f"),
+                        "warranty_status": st.column_config.TextColumn("Warranty Coverage"), 
+                        "pergantian_ke_total": st.column_config.NumberColumn("#Total", format="%d", help="Total pergantian seumur hidup"),
+                        "pergantian_ke_yearly": st.column_config.NumberColumn("#Yearly", format="%d", help="Pergantian dalam siklus tahun berjalan (reset tiap tahun)"),
+                        "odometer": st.column_config.NumberColumn("Odometer (km)", format="%d")
+                    }
                 )
             else:
-                df_display['location_category'] = 'Unknown'
-
-            st.dataframe(
-                df_display,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "created_at": st.column_config.DatetimeColumn("Date", format="YYYY-MM-DD HH:mm"),
-                    "source_system": st.column_config.TextColumn("Source"),
-                    "order_number": st.column_config.TextColumn("Order #", width="medium"),
-                    "vehicle_plate": st.column_config.TextColumn("Plat Nomor"),
-                    "sku": st.column_config.TextColumn("SKU"),
-                    "item_name": st.column_config.TextColumn("Item Name", width="large"),
-                    # NEW LOCATION COLUMNS
-                    "service_location_name": st.column_config.TextColumn("Lokasi Servis"),
-                    "location_category": st.column_config.TextColumn("Tipe Lokasi", help="Internal vs B2B (Grab)"),
-                    
-                    "bike_type": st.column_config.TextColumn("Bike Type"),
-                    "customer_type": st.column_config.TextColumn("Customer"),
-                    "quantity": st.column_config.NumberColumn("Qty", format="%.0f"),
-                    
-                    # NEW COLUMNS
-                    "subtotal_price": st.column_config.NumberColumn("Subtotal", format="Rp %.0f"),
-                    "old_price": st.column_config.NumberColumn("Old Price", format="Rp %.0f"), 
-                    
-                    "final_price": st.column_config.NumberColumn("Price", format="Rp %.0f"),
-                    "warranty_status": st.column_config.TextColumn("Warranty Coverage"), 
-                    "pergantian_ke_total": st.column_config.NumberColumn("#Total", format="%d", help="Total pergantian seumur hidup"),
-                    "pergantian_ke_yearly": st.column_config.NumberColumn("#Yearly", format="%d", help="Pergantian dalam siklus tahun berjalan (reset tiap tahun)"),
-                    "odometer": st.column_config.NumberColumn("Odometer (km)", format="%d")
-                }
-            )
-        else:
-            st.info("No data found with current filters.")
-            
-    except Exception as e:
-        st.error(f"Error loading data: {e}")
-else:
-    st.warning("Connect to Neon to view data")
+                st.info("No data found with current filters.")
+                
+        except Exception as e:
+            st.error(f"Error loading data: {e}")
+    else:
+        st.warning("Connect to Neon to view data")
 
 # =============================================================================
 # PRIME INPUT TABLE (GEL + Internal Repair + NOT_COVERED)
 # =============================================================================
 st.markdown("---")
-st.subheader("🎯 Prime Input Queue")
-st.caption("Data yang perlu diinput manual: **Internal Repair** + **GEL** + **NOT_COVERED**")
 
-if NEON_AVAILABLE:
-    try:
-        from src.services.prime_tracking_service import PrimeTrackingService
-        prime_service = PrimeTrackingService()
-        
-        # Pre-filter for Prime Input candidates
-        prime_filters = {
-            'customer_type': 'GEL',
-            'warranty_coverage': 'NOT_COVERED',
-            'location_category': 'Internal Repair'
-        }
-        
-        # Add date filters if set
-        if st.session_state.filter_date_mode != "All Time":
-            if st.session_state.filter_start_date:
-                prime_filters['start_date'] = st.session_state.filter_start_date
-            if st.session_state.filter_end_date:
-                prime_filters['end_date'] = st.session_state.filter_end_date
-        
-        prime_df, prime_count = neon_service.get_data_for_display(
-            filters=prime_filters,
-            page=st.session_state.prime_page,
-            page_size=25
-        )
-        
-        # Stats
-        prime_stats = prime_service.get_stats()
-        stat_col1, stat_col2, stat_col3 = st.columns(3)
-        with stat_col1:
-            st.metric("Total Queue", prime_count)
-        with stat_col2:
-            st.metric("✅ Sudah Input", prime_stats['total_primed'])
-        with stat_col3:
-            st.metric("⏳ Belum Input", prime_stats['total_pending'])
-        
-        if not prime_df.empty:
-            # Get primed status for current batch
-            primed_map = prime_service.get_primed_status_bulk(
-                prime_df[['order_number', 'sku', 'vehicle_plate']].to_dict('records')
+with st.expander("🎯 Prime Input Queue", expanded=False):
+    st.caption("Data yang perlu diinput manual: **Internal Repair** + **GEL** + **NOT_COVERED**")
+    
+    if NEON_AVAILABLE:
+        try:
+            from src.services.prime_tracking_service import PrimeTrackingService
+            # Use same connection string from secrets
+            conn_str = st.secrets.get("NEON_DB_CONNECTION_STRING")
+            prime_service = PrimeTrackingService(connection_string=conn_str)
+            
+            # Pre-filter for Prime Input candidates
+            prime_filters = {
+                'customer_type': 'GEL',
+                'warranty_coverage': 'NOT_COVERED',
+                'location_category': 'Internal Repair'
+            }
+            
+            # Add date filters if set
+            if st.session_state.filter_date_mode != "All Time":
+                if st.session_state.filter_start_date:
+                    prime_filters['start_date'] = st.session_state.filter_start_date
+                if st.session_state.filter_end_date:
+                    prime_filters['end_date'] = st.session_state.filter_end_date
+            
+            prime_df, prime_count = neon_service.get_data_for_display(
+                filters=prime_filters,
+                page=st.session_state.prime_page,
+                page_size=25
             )
             
-            # Add checkbox column
-            prime_df['is_primed'] = prime_df.apply(
-                lambda r: primed_map.get(f"{r['order_number']}|{r['sku']}|{r['vehicle_plate']}", False),
-                axis=1
-            )
+            # Stats
+            prime_stats = prime_service.get_stats()
+            stat_col1, stat_col2, stat_col3 = st.columns(3)
+            with stat_col1:
+                st.metric("Total Queue", prime_count)
+            with stat_col2:
+                st.metric("✅ Sudah Input", prime_stats['total_primed'])
+            with stat_col3:
+                st.metric("⏳ Belum Input", prime_stats['total_pending'])
             
-            # Display with checkboxes (using data_editor for interactivity)
-            edited_df = st.data_editor(
-                prime_df[['is_primed', 'created_at', 'order_number', 'vehicle_plate', 'sku', 'item_name', 'service_location_name', 'final_price']],
-                column_config={
-                    "is_primed": st.column_config.CheckboxColumn("✅ Input?", default=False),
-                    "created_at": st.column_config.DatetimeColumn("Date", format="YYYY-MM-DD HH:mm"),
-                    "order_number": st.column_config.TextColumn("Order #"),
-                    "vehicle_plate": st.column_config.TextColumn("Plat"),
-                    "sku": st.column_config.TextColumn("SKU"),
-                    "item_name": st.column_config.TextColumn("Item"),
-                    "service_location_name": st.column_config.TextColumn("Lokasi"),
-                    "final_price": st.column_config.NumberColumn("Price", format="Rp %.0f"),
-                },
-                disabled=['created_at', 'order_number', 'vehicle_plate', 'sku', 'item_name', 'service_location_name', 'final_price'],
-                hide_index=True,
-                use_container_width=True,
-                key="prime_editor"
-            )
-            
-            # Save button for changes
-            if st.button("💾 Save Prime Status", type="primary"):
-                changes_made = 0
-                for idx, row in edited_df.iterrows():
-                    orig_row = prime_df.iloc[idx]
-                    if row['is_primed'] != orig_row['is_primed']:
-                        prime_service.set_primed(
-                            order_number=orig_row['order_number'],
-                            sku=orig_row['sku'],
-                            vehicle_plate=orig_row['vehicle_plate'],
-                            is_primed=row['is_primed']
-                        )
-                        changes_made += 1
+            if not prime_df.empty:
+                # Get primed status for current batch
+                primed_map = prime_service.get_primed_status_bulk(
+                    prime_df[['order_number', 'sku', 'vehicle_plate']].to_dict('records')
+                )
                 
-                if changes_made > 0:
-                    st.success(f"✅ Saved {changes_made} changes!")
-                    st.rerun()
-                else:
-                    st.info("No changes to save.")
-            
-            # Pagination for Prime table
-            prime_total_pages = max(1, (prime_count + 24) // 25)
-            pcol1, pcol2, pcol3 = st.columns([1, 2, 1])
-            with pcol1:
-                if st.button("⬅️ Prev", disabled=st.session_state.prime_page <= 1, key="prime_prev"):
-                    st.session_state.prime_page -= 1
-                    st.rerun()
-            with pcol2:
-                st.markdown(f"<center>Page **{st.session_state.prime_page}** of **{prime_total_pages}**</center>", unsafe_allow_html=True)
-            with pcol3:
-                if st.button("Next ➡️", disabled=st.session_state.prime_page >= prime_total_pages, key="prime_next"):
-                    st.session_state.prime_page += 1
-                    st.rerun()
-        else:
-            st.success("🎉 Tidak ada data yang perlu diinput!")
-            
-    except Exception as e:
-        st.error(f"Error loading Prime Input data: {e}")
+                # Add checkbox column
+                prime_df['is_primed'] = prime_df.apply(
+                    lambda r: primed_map.get(f"{r['order_number']}|{r['sku']}|{r['vehicle_plate']}", False),
+                    axis=1
+                )
+                
+                # Display with checkboxes (using data_editor for interactivity)
+                edited_df = st.data_editor(
+                    prime_df[['is_primed', 'created_at', 'order_number', 'vehicle_plate', 'sku', 'item_name', 'service_location_name', 'final_price']],
+                    column_config={
+                        "is_primed": st.column_config.CheckboxColumn("✅ Input?", default=False),
+                        "created_at": st.column_config.DatetimeColumn("Date", format="YYYY-MM-DD HH:mm"),
+                        "order_number": st.column_config.TextColumn("Order #"),
+                        "vehicle_plate": st.column_config.TextColumn("Plat"),
+                        "sku": st.column_config.TextColumn("SKU"),
+                        "item_name": st.column_config.TextColumn("Item"),
+                        "service_location_name": st.column_config.TextColumn("Lokasi"),
+                        "final_price": st.column_config.NumberColumn("Price", format="Rp %.0f"),
+                    },
+                    disabled=['created_at', 'order_number', 'vehicle_plate', 'sku', 'item_name', 'service_location_name', 'final_price'],
+                    hide_index=True,
+                    use_container_width=True,
+                    key="prime_editor"
+                )
+                
+                # Save button for changes
+                if st.button("💾 Save Prime Status", type="primary"):
+                    changes_made = 0
+                    for idx, row in edited_df.iterrows():
+                        orig_row = prime_df.iloc[idx]
+                        if row['is_primed'] != orig_row['is_primed']:
+                            prime_service.set_primed(
+                                order_number=orig_row['order_number'],
+                                sku=orig_row['sku'],
+                                vehicle_plate=orig_row['vehicle_plate'],
+                                is_primed=row['is_primed']
+                            )
+                            changes_made += 1
+                    
+                    if changes_made > 0:
+                        st.success(f"✅ Saved {changes_made} changes!")
+                        st.rerun()
+                    else:
+                        st.info("No changes to save.")
+                
+                # Pagination for Prime table
+                prime_total_pages = max(1, (prime_count + 24) // 25)
+                pcol1, pcol2, pcol3 = st.columns([1, 2, 1])
+                with pcol1:
+                    if st.button("⬅️ Prev", disabled=st.session_state.prime_page <= 1, key="prime_prev"):
+                        st.session_state.prime_page -= 1
+                        st.rerun()
+                with pcol2:
+                    st.markdown(f"<center>Page **{st.session_state.prime_page}** of **{prime_total_pages}**</center>", unsafe_allow_html=True)
+                with pcol3:
+                    if st.button("Next ➡️", disabled=st.session_state.prime_page >= prime_total_pages, key="prime_next"):
+                        st.session_state.prime_page += 1
+                        st.rerun()
+            else:
+                st.success("🎉 Tidak ada data yang perlu diinput!")
+                
+        except Exception as e:
+            st.error(f"Error loading Prime Input data: {e}")
 
 # =============================================================================
 # CHARTS SECTION
