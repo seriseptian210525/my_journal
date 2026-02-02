@@ -299,9 +299,10 @@ def standardize_service_items(df, asset_df=pd.DataFrame(), mapping_df=pd.DataFra
     
     # BIKE_TYPE ENRICHMENT from Asset List
     if not asset_df.empty:
-        out['join_plate'] = out['vehicle_plate'].str.strip().str.upper()
+        # Robust Join: Remove spaces for matching
+        out['join_plate'] = out['vehicle_plate'].str.strip().str.upper().str.replace(' ', '')
         asset_clean = asset_df.copy()
-        asset_clean['join_plate'] = asset_clean['Plat Nomor'].astype(str).str.strip().str.upper()
+        asset_clean['join_plate'] = asset_clean['Plat Nomor'].astype(str).str.strip().str.upper().str.replace(' ', '')
         asset_clean['asset_model'] = asset_clean['Model'].astype(str).str.slice(0, 50)
         asset_clean = asset_clean.drop_duplicates(subset=['join_plate'])
         
@@ -367,9 +368,10 @@ def standardize_part_usage(df, asset_df=pd.DataFrame(), mapping_df=pd.DataFrame(
 
     # CUSTOMER TYPE ENRICHMENT
     if not asset_df.empty:
-        out['join_plate'] = out['vehicle_plate'].str.strip().str.upper()
+        # Robust Join: Remove spaces for matching
+        out['join_plate'] = out['vehicle_plate'].str.strip().str.upper().str.replace(' ', '')
         asset_clean = asset_df.copy()
-        asset_clean['join_plate'] = asset_clean['Plat Nomor'].astype(str).str.strip().str.upper()
+        asset_clean['join_plate'] = asset_clean['Plat Nomor'].astype(str).str.strip().str.upper().str.replace(' ', '')
         
         # Deduplicate asset list? Assume 1 plate = 1 customer type?
         # Drop duplicates on plate to ensure 1:1 join
