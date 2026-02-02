@@ -76,7 +76,8 @@ def calculate_warranty_coverage(df, asset_df=None, mapping_df=None, skip_sequenc
     
     # --- Step 1: Join delivery_date from Asset List ---
     if asset_df is not None and not asset_df.empty:
-        out['join_plate'] = out['vehicle_plate'].astype(str).str.strip().str.upper()
+        # Robust Join: Remove spaces for matching
+        out['join_plate'] = out['vehicle_plate'].astype(str).str.strip().str.upper().str.replace(' ', '')
         asset_clean = asset_df.copy()
         
         # Try different column names for plate
@@ -94,7 +95,7 @@ def calculate_warranty_coverage(df, asset_df=None, mapping_df=None, skip_sequenc
                 break
         
         if plate_col and delivery_col:
-            asset_clean['join_plate'] = asset_clean[plate_col].astype(str).str.strip().str.upper()
+            asset_clean['join_plate'] = asset_clean[plate_col].astype(str).str.strip().str.upper().str.replace(' ', '')
             asset_clean['_delivery_date'] = pd.to_datetime(asset_clean[delivery_col], errors='coerce')
             asset_clean = asset_clean.drop_duplicates(subset=['join_plate'])
             
