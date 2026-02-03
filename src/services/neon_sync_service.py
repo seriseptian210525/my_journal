@@ -286,10 +286,42 @@ class NeonSyncService:
             
             final_df = final_enriched_df[final_columns].copy()
             
+            # --- PREVENT DUPLICATE INSERT ---
+            # Check existing order_numbers in Neon and filter out duplicates
+            print("   🔍 Checking for existing order_numbers in Neon...")
+            try:
+                neon_orders_df = self.loader.fetch_df("""
+                    SELECT DISTINCT order_number FROM unified_part_logs
+                """)
+                if not neon_orders_df.empty:
+                    neon_order_set = set(neon_orders_df['order_number'].dropna().astype(str).str.strip().str.upper())
+                    
+                    # Normalize order_number in final_df for comparison
+                    final_df['order_key'] = final_df['order_number'].astype(str).str.strip().str.upper()
+                    
+                    before_filter = len(final_df)
+                    final_df = final_df[~final_df['order_key'].isin(neon_order_set)]
+                    after_filter = len(final_df)
+                    
+                    # Cleanup temp column
+                    final_df = final_df.drop(columns=['order_key'], errors='ignore')
+                    
+                    skipped = before_filter - after_filter
+                    if skipped > 0:
+                        print(f"   ⏭️ Skipped {skipped} rows (order_number already in Neon)")
+                        stats['duplicates_skipped'] = skipped
+            except Exception as e:
+                print(f"   ⚠️ Could not check existing orders: {e}")
+            
             # --- INSERT TO NEON ---
             if not final_df.empty:
+                print(f"   📤 Inserting {len(final_df)} new rows to Neon...")
                 self.loader.load_df_append(final_df, 'unified_part_logs')
                 stats['total_inserted'] = len(final_df)
+            else:
+                stats['status'] = 'no_new_data'
+                stats['message'] = 'All data already exists in Neon'
+                return stats
             
             stats['status'] = 'success'
             

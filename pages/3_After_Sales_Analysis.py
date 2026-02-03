@@ -62,11 +62,11 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
     
     with col2:
         st.markdown("### Sync to Neon Database")
-        st.info("Setelah upload CSV, sync ke Neon untuk update data dengan full data quality pipeline.")
+        st.info("Sync ke Neon dengan full data quality pipeline. Otomatis handle data baru & data susulan tanpa duplikat.")
         
         if NEON_AVAILABLE:
-            if st.button("🔄 Sync to Neon (Incremental)", type="secondary", use_container_width=True):
-                with st.spinner("Syncing to Neon Database (9-step pipeline)..."):
+            if st.button("🔄 Sync to Neon", type="secondary", use_container_width=True):
+                with st.spinner("Syncing to Neon (9-step pipeline + dedup check)..."):
                     try:
                         result = neon_service.run_incremental_sync()
                         if result['status'] == 'success':
@@ -74,46 +74,23 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
                             status_msg = f"""
                             ✅ **Sync completed!**
                             
-                            **Sources:**
-                            - Service Items: {result.get('service_items_new', 0)} new
-                            - Part Usage: {result.get('part_usage_new', 0)} new
+                            **Sources Checked:**
+                            - Service Items: {result.get('service_items_new', 0)} candidates
+                            - Part Usage: {result.get('part_usage_new', 0)} candidates
                             
                             **Data Quality:**
                             - Test plates excluded: {result.get('test_plates_excluded', 0)}
-                            - Customer type fixed (L+H1=GEL): {result.get('customer_type_fixed', 0)}
+                            - Customer type fixed: {result.get('customer_type_fixed', 0)}
+                            - Duplicates skipped: {result.get('duplicates_skipped', 0)}
                             
-                            **Total Inserted:** {result.get('total_inserted', 0)} rows
+                            **Inserted:** {result.get('total_inserted', 0)} new rows
                             """
                             st.success(status_msg)
                         elif result['status'] == 'no_new_data':
-                            st.info("ℹ️ No new data to sync. Sources are up to date.")
+                            msg = result.get('message', 'No new data to sync.')
+                            st.info(f"ℹ️ {msg}")
                         else:
                             st.error(f"❌ Sync failed: {result.get('error', 'Unknown error')}")
-                    except Exception as e:
-                        st.error(f"❌ Error: {str(e)}")
-            
-            # Sync Missing button - for handling late/failed data
-            st.markdown("---")
-            st.caption("🔧 **Recovery:** Jika ada data yang gagal insert sebelumnya")
-            if st.button("🔄 Sync Missing Orders", type="secondary", use_container_width=True):
-                with st.spinner("Checking for missing orders..."):
-                    try:
-                        result = neon_service.sync_missing_data()
-                        if result['status'] == 'success':
-                            st.success(f"""
-                            ✅ **Sync Missing Completed!**
-                            
-                            - Source orders: {result.get('source_orders', 0):,}
-                            - Neon orders: {result.get('neon_orders', 0):,}
-                            - Missing orders found: {result.get('missing_orders', 0):,}
-                            - **Rows inserted:** {result.get('total_inserted', 0):,}
-                            """)
-                        elif result['status'] == 'no_missing_data':
-                            st.info("✅ No missing data. Neon is fully in sync with source.")
-                        elif result['status'] == 'no_source_data':
-                            st.warning("⚠️ No source data available.")
-                        else:
-                            st.error(f"❌ Failed: {result.get('error', 'Unknown error')}")
                     except Exception as e:
                         st.error(f"❌ Error: {str(e)}")
         else:
