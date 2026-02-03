@@ -450,13 +450,12 @@ class NeonSyncService:
     def get_tire_cohort_data(self, filters: dict = None) -> pd.DataFrame:
         """
         Get Tire Cost Analysis data with GEL vs Non-GEL comparison.
-        Joins with Asset List to get delivery_date and initial_odometer.
+        Uses delivery_date directly from unified_part_logs (already in Neon).
         
         Logic:
         1. Query unified_part_logs for items containing 'Tire' or 'Ban'.
-        2. Join with Asset List on vehicle_plate.
-        3. Calculate duration_months = (created_at - delivery_date) / 30.44
-        4. Calculate odometer_diff = odometer - delivery_odometer (default 0)
+        2. Calculate duration_months = (created_at - delivery_date) / 30.44
+        3. Calculate odometer_diff = odometer - 0 (no delivery odometer available)
         """
         where_clauses = ["(item_name ILIKE '%Tire%' OR item_name ILIKE '%Ban%')"]
         params = {}
@@ -487,83 +486,39 @@ class NeonSyncService:
             final_price,
             odometer,
             created_at,
+            delivery_date,
             DATE(created_at) as replacement_date
         FROM unified_part_logs
         WHERE {where_sql}
         ORDER BY vehicle_plate, created_at
         """
         
-        # 1. Fetch Logs data
-        logs_df = self.loader.fetch_df(query, params)
-        if logs_df.empty:
+        # Fetch data from Neon
+        df = self.loader.fetch_df(query, params)
+        if df.empty:
             return pd.DataFrame()
 
-        # 2. Fetch Asset List for Delivery Date & Odometer
-        try:
-            asset_df = self.data_loader.load_gspread_data(SHEET_ID_ASSET_LIST, WORKSHEET_ASSET)
-            
-            if not asset_df.empty:
-                # Prepare Asset data (Plate, Delivery Date, Delivery Odometer)
-                asset_clean = asset_df.copy()
-                
-                # Normalize Plate
-                plate_col = next((c for c in ['Plat Nomor', 'Plate Number', 'vehicle_license_plate'] if c in asset_clean.columns), None)
-                date_col = next((c for c in ['Delivery - Outbone', 'Delivery Date', 'delivery_date'] if c in asset_clean.columns), None)
-                odo_col = next((c for c in ['Delivery Odometer', 'Initial Odometer'] if c in asset_clean.columns), None) # Fallback to 0 if missing
-                
-                if plate_col and date_col:
-                    asset_clean['join_plate'] = asset_clean[plate_col].astype(str).str.strip().str.upper().str.replace(' ', '')
-                    asset_clean['delivery_date'] = pd.to_datetime(asset_clean[date_col], errors='coerce')
-                    
-                    if odo_col:
-                        # Vectorized cleanup for Odometer
-                        asset_clean['delivery_odometer'] = pd.to_numeric(
-                            asset_clean[odo_col].astype(str).str.replace(',', '').str.replace(r'[^\d.-]', '', regex=True), 
-                            errors='coerce'
-                        ).fillna(0)
-                    else:
-                        asset_clean['delivery_odometer'] = 0
-                        
-                    # Deduplicate by plate
-                    asset_clean = asset_clean.sort_values('delivery_date').drop_duplicates(subset=['join_plate'], keep='last')
-                    
-                    # 3. Join
-                    logs_df['join_plate'] = logs_df['vehicle_plate'].astype(str).str.strip().str.upper().str.replace(' ', '')
-                    merged = pd.merge(logs_df, asset_clean[['join_plate', 'delivery_date', 'delivery_odometer']], on='join_plate', how='left')
-                    
-                    # 4. Calculate Metrics
-                    merged['created_at'] = pd.to_datetime(merged['created_at'])
-                    merged['duration_months'] = ((merged['created_at'] - merged['delivery_date']).dt.days / 30.44).fillna(0).round(1)
-                    
-                    # Ensure positive duration (if data issue where replacement < delivery, set to 0)
-                    merged['duration_months'] = merged['duration_months'].apply(lambda x: max(0, x))
-                    
-                    merged['current_odometer'] = pd.to_numeric(merged['odometer'], errors='coerce').fillna(0)
-                    merged['odometer_diff'] = merged['current_odometer'] - merged['delivery_odometer'].fillna(0)
-                    merged['odometer_diff'] = merged['odometer_diff'].apply(lambda x: max(0, x))
-                    
-                    # Categorize GEL vs Non-GEL
-                    merged['customer_category'] = np.where(
-                        merged['customer_type'].astype(str).str.strip().str.upper() == 'GEL',
-                        'GEL',
-                        'NON-GEL'
-                    )
-                    
-                    return merged
-                
-        except Exception as e:
-            print(f"⚠️ Error fetching Asset List or processing Tire data: {e}")
-            pass
-            
-        # Fallback if asset join fails: return basic data without calculated metrics
-        logs_df['duration_months'] = 0
-        logs_df['odometer_diff'] = 0
-        logs_df['delivery_date'] = pd.NaT
-        logs_df['delivery_odometer'] = 0
-        logs_df['current_odometer'] = pd.to_numeric(logs_df['odometer'], errors='coerce').fillna(0)
-        logs_df['customer_category'] = np.where(logs_df['customer_type'].astype(str) == 'GEL', 'GEL', 'NON-GEL')
+        # Calculate metrics
+        df['created_at'] = pd.to_datetime(df['created_at'])
+        df['delivery_date'] = pd.to_datetime(df['delivery_date'], errors='coerce')
         
-        return logs_df
+        # Duration in months
+        df['duration_months'] = ((df['created_at'] - df['delivery_date']).dt.days / 30.44).fillna(0).round(1)
+        df['duration_months'] = df['duration_months'].apply(lambda x: max(0, x))
+        
+        # Odometer metrics
+        df['current_odometer'] = pd.to_numeric(df['odometer'], errors='coerce').fillna(0)
+        df['delivery_odometer'] = 0  # Not available in current schema
+        df['odometer_diff'] = df['current_odometer']  # Just use current as "life"
+        
+        # Categorize GEL vs Non-GEL
+        df['customer_category'] = np.where(
+            df['customer_type'].astype(str).str.strip().str.upper() == 'GEL',
+            'GEL',
+            'NON-GEL'
+        )
+        
+        return df
     
     def get_cost_per_km_data(self, filters: dict = None) -> pd.DataFrame:
         """
