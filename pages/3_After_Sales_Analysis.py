@@ -62,28 +62,37 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
     
     with col2:
         st.markdown("### Sync to Neon Database")
-        st.info("Setelah upload CSV, sync ke Neon untuk update data.")
+        st.info("Setelah upload CSV, sync ke Neon untuk update data dengan full data quality pipeline.")
         
         if NEON_AVAILABLE:
             if st.button("🔄 Sync to Neon (Incremental)", type="secondary", use_container_width=True):
-                with st.spinner("Syncing to Neon Database..."):
+                with st.spinner("Syncing to Neon Database (9-step pipeline)..."):
                     try:
                         result = neon_service.run_incremental_sync()
                         if result['status'] == 'success':
-                            st.success(f"""
-                            ✅ Sync completed!
-                            - Service Items: {result['service_items_new']} new
-                            - Part Usage: {result['part_usage_new']} new
-                            - Total Inserted: {result['total_inserted']} rows
-                            """)
+                            # Build detailed status message
+                            status_msg = f"""
+                            ✅ **Sync completed!**
+                            
+                            **Sources:**
+                            - Service Items: {result.get('service_items_new', 0)} new
+                            - Part Usage: {result.get('part_usage_new', 0)} new
+                            
+                            **Data Quality:**
+                            - Test plates excluded: {result.get('test_plates_excluded', 0)}
+                            - Customer type fixed (L+H1=GEL): {result.get('customer_type_fixed', 0)}
+                            
+                            **Total Inserted:** {result.get('total_inserted', 0)} rows
+                            """
+                            st.success(status_msg)
                         elif result['status'] == 'no_new_data':
-                            st.info("ℹ️ No new data to sync.")
+                            st.info("ℹ️ No new data to sync. Sources are up to date.")
                         else:
                             st.error(f"❌ Sync failed: {result.get('error', 'Unknown error')}")
                     except Exception as e:
                         st.error(f"❌ Error: {str(e)}")
         else:
-            st.warning("Neon connection not available")
+            st.warning("Neon connection not available. Check NEON_DB_CONNECTION_STRING in .env")
 
 # =============================================================================
 # FILTERS (Dynamic with Apply Button)

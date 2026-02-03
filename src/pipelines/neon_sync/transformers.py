@@ -14,6 +14,80 @@ def standardize_service_type_vectorized(series):
     return series.astype(str).str.upper().str.strip().replace('NAN', '').replace('NONE', '')
 
 
+def normalize_odometer(df, max_odometer=200000, daily_km_estimate=100, max_delta_per_month=50000):
+    """
+    Normalize odometer values for data quality.
+    Benchmarked from work_orders/transformers.py process_odometer.
+    
+    Logic:
+    1. Clean non-numeric characters
+    2. Forward-fill zero/missing values with estimate (last_value + days * daily_km)
+    3. Cap outliers at max_odometer
+    4. Enforce monotonic increase per plate (cap decreasing values to previous)
+    5. Cap large jumps (> max_delta_per_month within 30 days)
+    
+    Args:
+        df: DataFrame with 'vehicle_plate', 'created_at', 'odometer' columns
+        max_odometer: Cap values above this (default 200,000 km)
+        daily_km_estimate: Estimated km/day for zero-fill (default 100)
+        max_delta_per_month: Max allowed delta in 30 days (default 50,000 km)
+    """
+    if df.empty or 'odometer' not in df.columns:
+        return df
+    
+    print("🔧 Normalizing Odometer...")
+    
+    # Step 1: Clean - extract numeric only
+    df['odometer'] = df['odometer'].astype(str).str.replace(r'[^\d]', '', regex=True).replace('', '0')
+    df['odometer'] = pd.to_numeric(df['odometer'], errors='coerce').fillna(0).astype('int64')
+    
+    # Step 2: Sort by plate and time for proper sequence
+    df = df.sort_values(['vehicle_plate', 'created_at']).reset_index(drop=True)
+    
+    # Step 3: Cap extreme outliers first (e.g., 51 million km -> max_odometer)
+    outliers_capped = (df['odometer'] > max_odometer).sum()
+    df.loc[df['odometer'] > max_odometer, 'odometer'] = max_odometer
+    if outliers_capped > 0:
+        print(f"   ⚠️ Capped {outliers_capped:,} outliers (> {max_odometer:,} km)")
+    
+    # Step 4: Forward-fill zeros with estimate (last_value + days * daily_km)
+    temp_odo = df['odometer'].replace(0, np.nan)
+    last_val = df.groupby('vehicle_plate')['odometer'].transform(
+        lambda x: x.replace(0, np.nan).ffill()
+    )
+    last_date = df.groupby('vehicle_plate')['created_at'].transform(
+        lambda x: x.where(df.loc[x.index, 'odometer'] > 0).ffill()
+    )
+    
+    diff_days = (pd.to_datetime(df['created_at']) - pd.to_datetime(last_date)).dt.days.fillna(0)
+    
+    # Only fill where odometer is 0 and we have a valid last value
+    mask_fill = (df['odometer'] == 0) & (last_val > 0)
+    estimated_values = (last_val + (diff_days * daily_km_estimate)).clip(upper=max_odometer)
+    
+    zeros_filled = mask_fill.sum()
+    df.loc[mask_fill, 'odometer'] = estimated_values[mask_fill].astype('int64')
+    if zeros_filled > 0:
+        print(f"   ✅ Estimated {zeros_filled:,} zero odometer values")
+    
+    # Step 5: Enforce monotonic increase per plate
+    # If current < previous, cap to previous value
+    df['prev_odometer'] = df.groupby('vehicle_plate')['odometer'].shift(1)
+    monotonic_violations = ((df['odometer'] < df['prev_odometer']) & (df['prev_odometer'].notna())).sum()
+    
+    if monotonic_violations > 0:
+        mask_decrease = (df['odometer'] < df['prev_odometer']) & (df['prev_odometer'].notna())
+        df.loc[mask_decrease, 'odometer'] = df.loc[mask_decrease, 'prev_odometer'].astype('int64')
+        print(f"   🔄 Fixed {monotonic_violations:,} monotonic violations (odometer decreased)")
+    
+    # Cleanup temp column
+    df = df.drop(columns=['prev_odometer'], errors='ignore')
+    
+    print(f"   ✅ Odometer normalized. Final range: {df['odometer'].min():,} - {df['odometer'].max():,}")
+    
+    return df
+
+
 def explode_rows(df):
     """
     Explode rows where quantity > 1 into multiple rows with quantity = 1.

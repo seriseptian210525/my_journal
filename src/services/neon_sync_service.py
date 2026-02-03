@@ -19,7 +19,8 @@ from src.pipelines.neon_sync.transformers import (
     standardize_service_items,
     standardize_part_usage,
     explode_rows,
-    calculate_warranty_coverage
+    calculate_warranty_coverage,
+    normalize_odometer
 )
 from src.common.data_loader import DataLoader
 from src.common.config import (
@@ -145,6 +146,39 @@ class NeonSyncService:
             
             # Create unified_df by merging Service Items and Part Usage
             unified_df = pd.concat([si_df, pu_df], ignore_index=True)
+            
+            # --- STEP 2: EXCLUDE TEST/INVALID PLATES ---
+            test_plates = [
+                'B 1234 XXX', 'B 3252 WWD', 'B 4086 SWF', 'B 4921 SVO', 'B 5050 BCA',
+                'B 9999 BLU', 'B 9999 GRE', 'EL 0015 H3', 'EL 1234 MKT'
+            ]
+            before_exclude = len(unified_df)
+            unified_df = unified_df[~unified_df['vehicle_plate'].isin(test_plates)]
+            stats['test_plates_excluded'] = before_exclude - len(unified_df)
+            
+            # --- STEP 3: FORWARD FILL MISSING DATA ---
+            fill_cols = ['delivery_date', 'customer_type', 'bike_type']
+            stats['forward_filled'] = {}
+            for col in fill_cols:
+                if col in unified_df.columns:
+                    missing_before = unified_df[col].isna().sum()
+                    if missing_before > 0:
+                        unified_df = unified_df.sort_values(['vehicle_plate', 'created_at'])
+                        unified_df[col] = unified_df.groupby('vehicle_plate')[col].transform(
+                            lambda x: x.ffill().bfill()
+                        )
+                        missing_after = unified_df[col].isna().sum()
+                        stats['forward_filled'][col] = missing_before - missing_after
+            
+            # --- STEP 4: FIX INCONSISTENT CUSTOMER_TYPE ---
+            # Rule: L-prefix plate + H1 model = GEL
+            if 'customer_type' in unified_df.columns and 'bike_type' in unified_df.columns:
+                l_prefix_h1_mask = (
+                    unified_df['vehicle_plate'].astype(str).str.startswith('L ') & 
+                    (unified_df['bike_type'].astype(str).str.upper() == 'H1')
+                )
+                stats['customer_type_fixed'] = (unified_df.loc[l_prefix_h1_mask, 'customer_type'] != 'GEL').sum()
+                unified_df.loc[l_prefix_h1_mask, 'customer_type'] = 'GEL'
 
             # --- DEDUPLICATION (CROSS-SOURCE) BEFORE EXPLODE ---
             # Priority: WO- prefix (from Part Usage) is preferred over non-WO (Service Items)
@@ -230,6 +264,9 @@ class NeonSyncService:
             # It will reuse the 'pergantian_ke' we just calculated to determine correct 'warranty_coverage'.
             print("   🛡️ Pass 2: Final Warranty Coverage Check...")
             final_enriched_df = calculate_warranty_coverage(enriched_df, asset_df=asset_df, mapping_df=mapping_df, skip_sequence_calc=True)
+            
+            # --- STEP 9: ODOMETER NORMALIZATION ---
+            final_enriched_df = normalize_odometer(final_enriched_df)
             
             # Ensure all required columns exist (matching run.py)
             final_columns = [

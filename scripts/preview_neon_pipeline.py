@@ -22,7 +22,8 @@ from src.pipelines.neon_sync.transformers import (
     standardize_service_items,
     standardize_part_usage,
     explode_rows,
-    calculate_warranty_coverage
+    calculate_warranty_coverage,
+    normalize_odometer
 )
 
 
@@ -75,6 +76,44 @@ def preview_pipeline(export_csv=True, sample_size=None):
     unified_df = pd.concat([si_df, pu_df], ignore_index=True)
     print(f"   Merged Total: {len(unified_df)} rows.")
     
+    # --- EXCLUDE TEST/INVALID PLATES ---
+    test_plates = [
+        'B 1234 XXX', 'B 3252 WWD', 'B 4086 SWF', 'B 4921 SVO', 'B 5050 BCA',
+        'B 9999 BLU', 'B 9999 GRE', 'EL 0015 H3', 'EL 1234 MKT'
+    ]
+    before_exclude = len(unified_df)
+    unified_df = unified_df[~unified_df['vehicle_plate'].isin(test_plates)]
+    excluded_count = before_exclude - len(unified_df)
+    if excluded_count > 0:
+        print(f"   🚫 Excluded {excluded_count} rows (test plates)")
+    
+    # --- FORWARD FILL MISSING DATA (delivery_date, customer_type, bike_type) ---
+    fill_cols = ['delivery_date', 'customer_type', 'bike_type']
+    for col in fill_cols:
+        if col in unified_df.columns:
+            missing_before = unified_df[col].isna().sum()
+            if missing_before > 0:
+                unified_df = unified_df.sort_values(['vehicle_plate', 'created_at'])
+                unified_df[col] = unified_df.groupby('vehicle_plate')[col].transform(
+                    lambda x: x.ffill().bfill()
+                )
+                missing_after = unified_df[col].isna().sum()
+                filled = missing_before - missing_after
+                if filled > 0:
+                    print(f"   ✅ Forward-filled {filled} missing {col} values")
+    
+    # --- FIX INCONSISTENT CUSTOMER_TYPE ---
+    # Rule: L-prefix plate + H1 model = GEL (from Asset List master convention)
+    if 'customer_type' in unified_df.columns and 'bike_type' in unified_df.columns:
+        l_prefix_h1_mask = (
+            unified_df['vehicle_plate'].astype(str).str.startswith('L ') & 
+            (unified_df['bike_type'].astype(str).str.upper() == 'H1')
+        )
+        before_fix = (unified_df.loc[l_prefix_h1_mask, 'customer_type'] != 'GEL').sum()
+        if before_fix > 0:
+            unified_df.loc[l_prefix_h1_mask, 'customer_type'] = 'GEL'
+            print(f"   🔧 Fixed {before_fix} rows: L-prefix + H1 → customer_type = GEL")
+    
     # --- DEDUPLICATION BEFORE EXPLODE ---
     # Priority: WO- prefix (from Part Usage) is preferred over non-WO (Service Items)
     print("\n🔄 Deduplicating cross-source duplicates (BEFORE explode)...")
@@ -114,6 +153,9 @@ def preview_pipeline(export_csv=True, sample_size=None):
     # --- WARRANTY CALCULATION ---
     print("\n🛡️ Calculating Warranty Coverage...")
     enriched_df = calculate_warranty_coverage(exploded_df, asset_df=asset_df, mapping_df=mapping_df)
+    
+    # --- ODOMETER NORMALIZATION ---
+    enriched_df = normalize_odometer(enriched_df)
     
     # --- DIAGNOSTIC: Why no WARRANTY/INSURANCE? ---
     print("\n🔎 DIAGNOSTIC: Warranty Logic Debug")
