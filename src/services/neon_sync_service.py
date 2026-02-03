@@ -559,6 +559,8 @@ class NeonSyncService:
         logs_df['duration_months'] = 0
         logs_df['odometer_diff'] = 0
         logs_df['delivery_date'] = pd.NaT
+        logs_df['delivery_odometer'] = 0
+        logs_df['current_odometer'] = pd.to_numeric(logs_df['odometer'], errors='coerce').fillna(0)
         logs_df['customer_category'] = np.where(logs_df['customer_type'].astype(str) == 'GEL', 'GEL', 'NON-GEL')
         
         return logs_df
