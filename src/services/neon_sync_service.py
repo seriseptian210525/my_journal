@@ -299,6 +299,196 @@ class NeonSyncService:
         
         return stats
     
+    def sync_missing_data(self) -> dict:
+        """
+        Sync data that might have been missed due to failed inserts.
+        Uses order_number comparison instead of max_date filter.
+        
+        Logic:
+        1. Get all unique order_numbers from Neon
+        2. Get all order_numbers from source (Service Items + Part Usage)
+        3. Find order_numbers in source but NOT in Neon
+        4. Process and insert only those missing orders
+        """
+        stats = {
+            'status': 'started',
+            'source_orders': 0,
+            'neon_orders': 0,
+            'missing_orders': 0,
+            'total_inserted': 0,
+            'timestamp': datetime.now()
+        }
+        
+        try:
+            # --- STEP 1: Get existing order_numbers from Neon ---
+            print("📡 Fetching existing order_numbers from Neon...")
+            neon_orders_df = self.loader.fetch_df("""
+                SELECT DISTINCT order_number FROM unified_part_logs
+            """)
+            neon_order_set = set(neon_orders_df['order_number'].dropna().astype(str).str.strip().str.upper())
+            stats['neon_orders'] = len(neon_order_set)
+            print(f"   Found {len(neon_order_set):,} unique orders in Neon")
+            
+            # --- STEP 2: Load auxiliary data ---
+            asset_df = self.data_loader.load_gspread_data(SHEET_ID_ASSET_LIST, WORKSHEET_ASSET)
+            mapping_df = self.data_loader.load_gspread_data(SHEET_ID_MAPPINGS, WORKSHEET_MAPPINGS)
+            
+            # --- STEP 3: Load all source data ---
+            print("📦 Loading source data...")
+            raw_si = self.data_loader.load_gspread_data(SHEET_ID_SERVICE_ITEMS, WORKSHEET_SERVICE_ITEMS)
+            raw_pu = self.data_loader.load_gspread_data(SHEET_ID_OUTPUT_REVIEW, WORKSHEET_PART_USAGE)
+            
+            # Standardize
+            si_df = standardize_service_items(raw_si, asset_df=asset_df, mapping_df=mapping_df) if not raw_si.empty else pd.DataFrame()
+            pu_df = standardize_part_usage(raw_pu, asset_df=asset_df, mapping_df=mapping_df) if not raw_pu.empty else pd.DataFrame()
+            
+            # Merge all source
+            all_source_df = pd.concat([si_df, pu_df], ignore_index=True)
+            
+            if all_source_df.empty:
+                stats['status'] = 'no_source_data'
+                return stats
+            
+            # Get source order_numbers
+            all_source_df['order_key'] = all_source_df['order_number'].astype(str).str.strip().str.upper()
+            source_order_set = set(all_source_df['order_key'].dropna())
+            stats['source_orders'] = len(source_order_set)
+            print(f"   Found {len(source_order_set):,} unique orders in source")
+            
+            # --- STEP 4: Find missing orders ---
+            missing_orders = source_order_set - neon_order_set
+            stats['missing_orders'] = len(missing_orders)
+            
+            if not missing_orders:
+                stats['status'] = 'no_missing_data'
+                print("✅ No missing data found. Neon is in sync with source.")
+                return stats
+            
+            print(f"🔍 Found {len(missing_orders):,} missing orders to sync")
+            
+            # --- STEP 5: Filter source to only missing orders ---
+            missing_df = all_source_df[all_source_df['order_key'].isin(missing_orders)].copy()
+            missing_df = missing_df.drop(columns=['order_key'], errors='ignore')
+            
+            print(f"   Rows to process: {len(missing_df):,}")
+            
+            # --- APPLY ALL 9 PIPELINE STEPS ---
+            
+            # Step 2: Exclude test plates
+            test_plates = [
+                'B 1234 XXX', 'B 3252 WWD', 'B 4086 SWF', 'B 4921 SVO', 'B 5050 BCA',
+                'B 9999 BLU', 'B 9999 GRE', 'EL 0015 H3', 'EL 1234 MKT'
+            ]
+            missing_df = missing_df[~missing_df['vehicle_plate'].isin(test_plates)]
+            
+            # Step 3: Forward fill
+            fill_cols = ['delivery_date', 'customer_type', 'bike_type']
+            for col in fill_cols:
+                if col in missing_df.columns:
+                    missing_before = missing_df[col].isna().sum()
+                    if missing_before > 0:
+                        missing_df = missing_df.sort_values(['vehicle_plate', 'created_at'])
+                        missing_df[col] = missing_df.groupby('vehicle_plate')[col].transform(
+                            lambda x: x.ffill().bfill()
+                        )
+            
+            # Step 4: L+H1=GEL fix
+            if 'customer_type' in missing_df.columns and 'bike_type' in missing_df.columns:
+                l_prefix_h1_mask = (
+                    missing_df['vehicle_plate'].astype(str).str.startswith('L ') & 
+                    (missing_df['bike_type'].astype(str).str.upper() == 'H1')
+                )
+                missing_df.loc[l_prefix_h1_mask, 'customer_type'] = 'GEL'
+            
+            # Dedup
+            missing_df['has_wo_prefix'] = missing_df['order_number'].astype(str).str.contains('WO-', case=False, na=False)
+            missing_df['dedup_plate'] = missing_df['vehicle_plate'].astype(str).str.strip().str.upper()
+            missing_df['dedup_sku'] = missing_df['sku'].astype(str).str.strip().str.upper()
+            missing_df['dedup_loc'] = missing_df['service_location_name'].astype(str).str.strip().str.upper()
+            missing_df['dedup_date'] = pd.to_datetime(missing_df['created_at']).dt.date.astype(str)
+            missing_df = missing_df.sort_values(by=['has_wo_prefix'], ascending=[False])
+            key_cols = ['dedup_plate', 'dedup_sku', 'dedup_date', 'dedup_loc']
+            missing_df = missing_df.drop_duplicates(subset=key_cols, keep='first')
+            missing_df = missing_df.drop(columns=['dedup_plate', 'dedup_sku', 'dedup_loc', 'dedup_date', 'has_wo_prefix'], errors='ignore')
+            
+            # Explode
+            exploded_df = explode_rows(missing_df)
+            
+            # Sort
+            exploded_df['created_at'] = pd.to_datetime(exploded_df['created_at'])
+            exploded_df.sort_values(by=['created_at'], ascending=True, inplace=True)
+            
+            # Warranty calculation
+            print("   🛡️ Calculating warranty coverage...")
+            enriched_df = calculate_warranty_coverage(exploded_df, asset_df=asset_df, mapping_df=mapping_df, skip_sequence_calc=True)
+            
+            # Smart pergantian ke with offset
+            enriched_df['local_total'] = enriched_df.groupby(['vehicle_plate', 'sku']).cumcount() + 1
+            enriched_df['local_yearly'] = enriched_df.groupby(['vehicle_plate', 'sku', 'year_cycle']).cumcount() + 1
+            
+            df_max_total = self.get_max_total_pk()
+            df_max_yearly = self.get_max_yearly_pk()
+            
+            if 'year_cycle' in enriched_df.columns:
+                enriched_df['year_cycle'] = enriched_df['year_cycle'].fillna(0).astype(int)
+            
+            if not df_max_total.empty:
+                enriched_df = pd.merge(enriched_df, df_max_total, on=['vehicle_plate', 'sku'], how='left')
+                enriched_df['max_pk_total'] = enriched_df['max_pk_total'].fillna(0).astype(int)
+                enriched_df['pergantian_ke_total'] = enriched_df['max_pk_total'] + enriched_df['local_total']
+                enriched_df.drop(columns=['max_pk_total', 'local_total'], inplace=True, errors='ignore')
+            else:
+                enriched_df['pergantian_ke_total'] = enriched_df['local_total']
+                enriched_df.drop(columns=['local_total'], inplace=True, errors='ignore')
+                
+            if not df_max_yearly.empty:
+                if 'year_cycle' in df_max_yearly.columns:
+                    df_max_yearly['year_cycle'] = df_max_yearly['year_cycle'].fillna(0).astype(int)
+                enriched_df = pd.merge(enriched_df, df_max_yearly, on=['vehicle_plate', 'sku', 'year_cycle'], how='left')
+                enriched_df['max_pk_yearly'] = enriched_df['max_pk_yearly'].fillna(0).astype(int)
+                enriched_df['pergantian_ke_yearly'] = enriched_df['max_pk_yearly'] + enriched_df['local_yearly']
+                enriched_df.drop(columns=['max_pk_yearly', 'local_yearly'], inplace=True, errors='ignore')
+            else:
+                enriched_df['pergantian_ke_yearly'] = enriched_df['local_yearly']
+                enriched_df.drop(columns=['local_yearly'], inplace=True, errors='ignore')
+            
+            # Final coverage
+            final_enriched_df = calculate_warranty_coverage(enriched_df, asset_df=asset_df, mapping_df=mapping_df, skip_sequence_calc=True)
+            
+            # Odometer normalization
+            final_enriched_df = normalize_odometer(final_enriched_df)
+            
+            # Ensure columns
+            final_columns = [
+                'source_system', 'created_at', 'order_number', 'vehicle_plate', 'sku', 'item_name', 
+                'erp_product_id', 'item_type', 'service_type', 'service_location_name', 'completed_by', 
+                'customer_type', 'quantity', 'unit_price', 'final_price', 'subtotal_price', 'old_price',
+                'warranty_status', 'status', 'odometer', 'bike_type',
+                'delivery_date', 'bulan_ke', 'year_cycle', 'customer_category',
+                'warranty_type', 'covered_for', 'limit_per_year', 'pergantian_ke_total', 'pergantian_ke_yearly', 'warranty_coverage'
+            ]
+            
+            for col in final_columns:
+                if col not in final_enriched_df.columns:
+                    final_enriched_df[col] = None
+            
+            final_df = final_enriched_df[final_columns].copy()
+            
+            # Insert
+            if not final_df.empty:
+                print(f"   📤 Inserting {len(final_df):,} rows to Neon...")
+                self.loader.load_df_append(final_df, 'unified_part_logs')
+                stats['total_inserted'] = len(final_df)
+            
+            stats['status'] = 'success'
+            print(f"✅ Sync missing data completed: {stats['total_inserted']:,} rows inserted")
+            
+        except Exception as e:
+            stats['status'] = 'error'
+            stats['error'] = str(e)
+        
+        return stats
+    
     def get_data_for_display(self, filters: dict = None, page: int = 1, page_size: int = 50) -> tuple:
         """
         Get data from Neon for Streamlit display with filters and pagination.

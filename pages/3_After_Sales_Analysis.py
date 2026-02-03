@@ -91,6 +91,31 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
                             st.error(f"❌ Sync failed: {result.get('error', 'Unknown error')}")
                     except Exception as e:
                         st.error(f"❌ Error: {str(e)}")
+            
+            # Sync Missing button - for handling late/failed data
+            st.markdown("---")
+            st.caption("🔧 **Recovery:** Jika ada data yang gagal insert sebelumnya")
+            if st.button("🔄 Sync Missing Orders", type="secondary", use_container_width=True):
+                with st.spinner("Checking for missing orders..."):
+                    try:
+                        result = neon_service.sync_missing_data()
+                        if result['status'] == 'success':
+                            st.success(f"""
+                            ✅ **Sync Missing Completed!**
+                            
+                            - Source orders: {result.get('source_orders', 0):,}
+                            - Neon orders: {result.get('neon_orders', 0):,}
+                            - Missing orders found: {result.get('missing_orders', 0):,}
+                            - **Rows inserted:** {result.get('total_inserted', 0):,}
+                            """)
+                        elif result['status'] == 'no_missing_data':
+                            st.info("✅ No missing data. Neon is fully in sync with source.")
+                        elif result['status'] == 'no_source_data':
+                            st.warning("⚠️ No source data available.")
+                        else:
+                            st.error(f"❌ Failed: {result.get('error', 'Unknown error')}")
+                    except Exception as e:
+                        st.error(f"❌ Error: {str(e)}")
         else:
             st.warning("Neon connection not available. Check NEON_DB_CONNECTION_STRING in .env")
 
