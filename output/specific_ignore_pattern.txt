@@ -1,0 +1,4 @@
+# Specific Ignore Part Pattern
+# Replace the current broad pattern in Mappings sheet with this:
+
+(?i)cek|(?i)tidak ada|(?i)stel|(?i)#error|(?i)bleeding|(?i)press velg|(?i)tambah angin|(?i)pres velg|(?i)free|(?i)bleading
