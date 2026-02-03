@@ -146,20 +146,30 @@ class NeonSyncService:
             unified_df = pd.concat([si_df, pu_df], ignore_index=True)
 
             # --- DEDUPLICATION (CROSS-SOURCE) BEFORE EXPLODE ---
-            # Remove duplicates from Apps vs Manual Sheet while preserving qty-based rows
-            # --- DEDUPLICATION LOGIC ---
-            # Use strict normalization to avoid cross-source duplicates
+            # Priority: WO- prefix (from Part Usage) is preferred over non-WO (Service Items)
+            
+            # Step 1: Detect WO- prefix (from Part Usage) - these get priority
+            unified_df['has_wo_prefix'] = unified_df['order_number'].astype(str).str.contains('WO-', case=False, na=False)
+            
+            # Step 2: Strict normalization for dedup keys
             unified_df['dedup_plate'] = unified_df['vehicle_plate'].astype(str).str.strip().str.upper()
             unified_df['dedup_sku'] = unified_df['sku'].astype(str).str.strip().str.upper()
             unified_df['dedup_loc'] = unified_df['service_location_name'].astype(str).str.strip().str.upper()
             unified_df['dedup_date'] = pd.to_datetime(unified_df['created_at']).dt.date.astype(str)
             
+            # Step 3: Sort by WO- priority (True first = WO- records on top)
+            unified_df = unified_df.sort_values(by=['has_wo_prefix'], ascending=[False])
+            
             key_cols = ['dedup_plate', 'dedup_sku', 'dedup_date', 'dedup_loc']
             
             before_dedup = len(unified_df)
+            
+            # Step 4: Dedup keeping first (which is WO- due to sort)
             unified_df = unified_df.drop_duplicates(subset=key_cols, keep='first')
             after_dedup = len(unified_df)
-            unified_df = unified_df.drop(columns=['dedup_plate', 'dedup_sku', 'dedup_loc', 'dedup_date'], errors='ignore')
+            
+            # Cleanup temp columns
+            unified_df = unified_df.drop(columns=['dedup_plate', 'dedup_sku', 'dedup_loc', 'dedup_date', 'has_wo_prefix'], errors='ignore')
             
             if before_dedup != after_dedup:
                 print(f"   🔄 Deduped batch: {before_dedup - after_dedup} rows removed.")
