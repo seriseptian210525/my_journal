@@ -54,6 +54,7 @@ class PartUsageService:
     def sync_to_gsheet(self, df: pd.DataFrame):
         """
         Syncs DataFrame to Google Sheet using append-only logic.
+        Data is sorted by created_at ASC to maintain chronological order.
         """
         if df.empty:
             print("⚠️ Dataframe is empty, skipping sync.")
@@ -63,6 +64,13 @@ class PartUsageService:
         missing_keys = [k for k in self.deduplication_keys if k not in df.columns]
         if missing_keys:
             raise ValueError(f"❌ Missing deduplication keys in data: {missing_keys}")
+        
+        # Sort by created_at ASC to maintain chronological order
+        if 'created_at' in df.columns:
+            df = df.copy()
+            df['created_at'] = pd.to_datetime(df['created_at'], errors='coerce')
+            df = df.sort_values(by='created_at', ascending=True)
+            print(f"   📅 Sorted {len(df)} rows by created_at ASC")
 
         # Use DataLoader's robust append capability
         self.data_loader.append_to_sheet(
