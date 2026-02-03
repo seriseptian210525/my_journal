@@ -6,6 +6,7 @@ import os
 import sys
 from pathlib import Path
 import pandas as pd
+import numpy as np
 from datetime import datetime
 
 # Add project root
@@ -401,6 +402,50 @@ class NeonSyncService:
             options = {k: [] for k in ['vehicle_plate', 'item_name', 'customer_type', 'warranty_coverage', 'sku', 'service_location_name']}
             
         return options
+    
+    def get_cohort_data(self, filters: dict = None) -> pd.DataFrame:
+        """
+        Get cohort data for heatmap visualization.
+        Shows pergantian_ke timeline per vehicle+sku.
+        Apply all filters including dates.
+        """
+        where_clauses = ["vehicle_plate IS NOT NULL"]
+        params = {}
+        
+        if filters:
+            if filters.get('vehicle_plate') and filters['vehicle_plate'] != 'All':
+                where_clauses.append("vehicle_plate = :plate")
+                params['plate'] = filters['vehicle_plate']
+            
+            # Additional filters for charts
+            if filters.get('start_date'):
+                where_clauses.append("created_at >= :start_date")
+                params['start_date'] = filters['start_date']
+            
+            if filters.get('end_date'):
+                where_clauses.append("created_at <= :end_date")
+                params['end_date'] = filters['end_date']
+
+        where_sql = " AND ".join(where_clauses)
+
+        query = f"""
+        SELECT 
+            vehicle_plate,
+            sku,
+            item_name,
+            DATE_TRUNC('month', created_at) as month,
+            pergantian_ke_total,
+            pergantian_ke_yearly,
+            final_price,
+            odometer,
+            warranty_coverage,
+            created_at
+        FROM unified_part_logs
+        WHERE {where_sql}
+        ORDER BY vehicle_plate, sku, created_at
+        """
+        
+        return self.loader.fetch_df(query, params)
     
     def get_tire_cohort_data(self, filters: dict = None) -> pd.DataFrame:
         """
