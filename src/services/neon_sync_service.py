@@ -481,12 +481,26 @@ class NeonSyncService:
             vehicle_plate,
             sku,
             item_name,
-            customer_type,
+            -- Use FIRST_VALUE to get consistent non-null customer_type per plate
+            COALESCE(
+                customer_type,
+                FIRST_VALUE(customer_type) OVER (
+                    PARTITION BY vehicle_plate 
+                    ORDER BY CASE WHEN customer_type IS NOT NULL AND customer_type != '' THEN 0 ELSE 1 END, created_at DESC
+                )
+            ) as customer_type,
             pergantian_ke_total,
             final_price,
             odometer,
             created_at,
-            delivery_date,
+            -- Use FIRST_VALUE to get consistent non-null delivery_date per plate
+            COALESCE(
+                delivery_date,
+                FIRST_VALUE(delivery_date) OVER (
+                    PARTITION BY vehicle_plate 
+                    ORDER BY CASE WHEN delivery_date IS NOT NULL THEN 0 ELSE 1 END, created_at DESC
+                )
+            ) as delivery_date,
             DATE(created_at) as replacement_date
         FROM unified_part_logs
         WHERE {where_sql}
