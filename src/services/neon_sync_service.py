@@ -498,9 +498,9 @@ class NeonSyncService:
         if df.empty:
             return pd.DataFrame()
 
-        # Calculate metrics
-        df['created_at'] = pd.to_datetime(df['created_at'])
-        df['delivery_date'] = pd.to_datetime(df['delivery_date'], errors='coerce')
+        # Calculate metrics - normalize timezone (remove tz info)
+        df['created_at'] = pd.to_datetime(df['created_at']).dt.tz_localize(None)
+        df['delivery_date'] = pd.to_datetime(df['delivery_date'], errors='coerce').dt.tz_localize(None)
         
         # Duration in months
         df['duration_months'] = ((df['created_at'] - df['delivery_date']).dt.days / 30.44).fillna(0).round(1)
