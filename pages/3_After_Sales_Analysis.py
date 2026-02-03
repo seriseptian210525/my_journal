@@ -445,7 +445,8 @@ with st.expander("🎯 Prime Input Queue", expanded=False):
             prime_filters = {
                 'customer_type': 'GEL',
                 'warranty_coverage': 'NOT_COVERED',
-                'location_category': 'Internal Repair'
+                'location_category': 'Internal Repair',
+                'exclude_skus': ['GEN-F9060-001-N-NE', 'GEN-F9110-001-N-NE', 'H3A-F9130-001-N-NE']
             }
             
             # Add date filters if set
@@ -485,7 +486,7 @@ with st.expander("🎯 Prime Input Queue", expanded=False):
                 
                 # Display with checkboxes (using data_editor for interactivity)
                 edited_df = st.data_editor(
-                    prime_df[['is_primed', 'created_at', 'order_number', 'vehicle_plate', 'sku', 'item_name', 'service_location_name', 'final_price']],
+                    prime_df[['is_primed', 'created_at', 'order_number', 'vehicle_plate', 'sku', 'item_name', 'quantity', 'service_location_name', 'subtotal_price', 'old_price', 'final_price']],
                     column_config={
                         "is_primed": st.column_config.CheckboxColumn("✅ Input?", default=False),
                         "created_at": st.column_config.DatetimeColumn("Date", format="YYYY-MM-DD HH:mm"),
@@ -493,10 +494,13 @@ with st.expander("🎯 Prime Input Queue", expanded=False):
                         "vehicle_plate": st.column_config.TextColumn("Plat"),
                         "sku": st.column_config.TextColumn("SKU"),
                         "item_name": st.column_config.TextColumn("Item"),
+                        "quantity": st.column_config.NumberColumn("Qty", format="%.0f"),
                         "service_location_name": st.column_config.TextColumn("Lokasi"),
-                        "final_price": st.column_config.NumberColumn("Price", format="Rp %.0f"),
+                        "subtotal_price": st.column_config.NumberColumn("Subtotal", format="Rp %.0f"),
+                        "old_price": st.column_config.NumberColumn("Old Price", format="Rp %.0f"),
+                        "final_price": st.column_config.NumberColumn("Final Price", format="Rp %.0f"),
                     },
-                    disabled=['created_at', 'order_number', 'vehicle_plate', 'sku', 'item_name', 'service_location_name', 'final_price'],
+                    disabled=['created_at', 'order_number', 'vehicle_plate', 'sku', 'item_name', 'quantity', 'service_location_name', 'subtotal_price', 'old_price', 'final_price'],
                     hide_index=True,
                     use_container_width=True,
                     key="prime_editor"

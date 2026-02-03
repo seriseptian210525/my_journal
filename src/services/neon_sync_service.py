@@ -329,6 +329,14 @@ class NeonSyncService:
                         AND service_location_name NOT ILIKE '%Depok%'
                         AND service_location_name NOT ILIKE '%Bekasi%'
                     )""")
+            
+            # Exclude specific SKUs (for Prime Input filter)
+            if filters.get('exclude_skus'):
+                excluded = filters['exclude_skus']
+                placeholders = ", ".join([f":exclude_sku_{i}" for i in range(len(excluded))])
+                where_clauses.append(f"sku NOT IN ({placeholders})")
+                for i, sku_val in enumerate(excluded):
+                    params[f'exclude_sku_{i}'] = sku_val
         
         where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
         
