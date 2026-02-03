@@ -402,13 +402,18 @@ class NeonSyncService:
             
         return options
     
-    def get_cohort_data(self, filters: dict = None) -> pd.DataFrame:
+    def get_tire_cohort_data(self, filters: dict = None) -> pd.DataFrame:
         """
-        Get cohort data for heatmap visualization.
-        Shows pergantian_ke timeline per vehicle+sku.
-        Apply all filters including dates.
+        Get Tire Cost Analysis data with GEL vs Non-GEL comparison.
+        Joins with Asset List to get delivery_date and initial_odometer.
+        
+        Logic:
+        1. Query unified_part_logs for items containing 'Tire' or 'Ban'.
+        2. Join with Asset List on vehicle_plate.
+        3. Calculate duration_months = (created_at - delivery_date) / 30.44
+        4. Calculate odometer_diff = odometer - delivery_odometer (default 0)
         """
-        where_clauses = ["vehicle_plate IS NOT NULL"]
+        where_clauses = ["(item_name ILIKE '%Tire%' OR item_name ILIKE '%Ban%')"]
         params = {}
         
         if filters:
@@ -416,7 +421,7 @@ class NeonSyncService:
                 where_clauses.append("vehicle_plate = :plate")
                 params['plate'] = filters['vehicle_plate']
             
-            # Additional filters for charts
+            # Start/End date filters for replacement date
             if filters.get('start_date'):
                 where_clauses.append("created_at >= :start_date")
                 params['start_date'] = filters['start_date']
@@ -432,19 +437,86 @@ class NeonSyncService:
             vehicle_plate,
             sku,
             item_name,
-            DATE_TRUNC('month', created_at) as month,
+            customer_type,
             pergantian_ke_total,
-            pergantian_ke_yearly,
             final_price,
             odometer,
-            warranty_coverage,
-            created_at
+            created_at,
+            DATE(created_at) as replacement_date
         FROM unified_part_logs
         WHERE {where_sql}
-        ORDER BY vehicle_plate, sku, created_at
+        ORDER BY vehicle_plate, created_at
         """
         
-        return self.loader.fetch_df(query, params)
+        # 1. Fetch Logs data
+        logs_df = self.loader.fetch_df(query, params)
+        if logs_df.empty:
+            return pd.DataFrame()
+
+        # 2. Fetch Asset List for Delivery Date & Odometer
+        try:
+            asset_df = self.data_loader.load_gspread_data(SHEET_ID_ASSET_LIST, WORKSHEET_ASSET)
+            
+            if not asset_df.empty:
+                # Prepare Asset data (Plate, Delivery Date, Delivery Odometer)
+                asset_clean = asset_df.copy()
+                
+                # Normalize Plate
+                plate_col = next((c for c in ['Plat Nomor', 'Plate Number', 'vehicle_license_plate'] if c in asset_clean.columns), None)
+                date_col = next((c for c in ['Delivery - Outbone', 'Delivery Date', 'delivery_date'] if c in asset_clean.columns), None)
+                odo_col = next((c for c in ['Delivery Odometer', 'Initial Odometer'] if c in asset_clean.columns), None) # Fallback to 0 if missing
+                
+                if plate_col and date_col:
+                    asset_clean['join_plate'] = asset_clean[plate_col].astype(str).str.strip().str.upper().str.replace(' ', '')
+                    asset_clean['delivery_date'] = pd.to_datetime(asset_clean[date_col], errors='coerce')
+                    
+                    if odo_col:
+                        # Vectorized cleanup for Odometer
+                        asset_clean['delivery_odometer'] = pd.to_numeric(
+                            asset_clean[odo_col].astype(str).str.replace(',', '').str.replace(r'[^\d.-]', '', regex=True), 
+                            errors='coerce'
+                        ).fillna(0)
+                    else:
+                        asset_clean['delivery_odometer'] = 0
+                        
+                    # Deduplicate by plate
+                    asset_clean = asset_clean.sort_values('delivery_date').drop_duplicates(subset=['join_plate'], keep='last')
+                    
+                    # 3. Join
+                    logs_df['join_plate'] = logs_df['vehicle_plate'].astype(str).str.strip().str.upper().str.replace(' ', '')
+                    merged = pd.merge(logs_df, asset_clean[['join_plate', 'delivery_date', 'delivery_odometer']], on='join_plate', how='left')
+                    
+                    # 4. Calculate Metrics
+                    merged['created_at'] = pd.to_datetime(merged['created_at'])
+                    merged['duration_months'] = ((merged['created_at'] - merged['delivery_date']).dt.days / 30.44).fillna(0).round(1)
+                    
+                    # Ensure positive duration (if data issue where replacement < delivery, set to 0)
+                    merged['duration_months'] = merged['duration_months'].apply(lambda x: max(0, x))
+                    
+                    merged['current_odometer'] = pd.to_numeric(merged['odometer'], errors='coerce').fillna(0)
+                    merged['odometer_diff'] = merged['current_odometer'] - merged['delivery_odometer'].fillna(0)
+                    merged['odometer_diff'] = merged['odometer_diff'].apply(lambda x: max(0, x))
+                    
+                    # Categorize GEL vs Non-GEL
+                    merged['customer_category'] = np.where(
+                        merged['customer_type'].astype(str).str.strip().str.upper() == 'GEL',
+                        'GEL',
+                        'NON-GEL'
+                    )
+                    
+                    return merged
+                
+        except Exception as e:
+            print(f"⚠️ Error fetching Asset List or processing Tire data: {e}")
+            pass
+            
+        # Fallback if asset join fails: return basic data without calculated metrics
+        logs_df['duration_months'] = 0
+        logs_df['odometer_diff'] = 0
+        logs_df['delivery_date'] = pd.NaT
+        logs_df['customer_category'] = np.where(logs_df['customer_type'].astype(str) == 'GEL', 'GEL', 'NON-GEL')
+        
+        return logs_df
     
     def get_cost_per_km_data(self, filters: dict = None) -> pd.DataFrame:
         """
