@@ -515,15 +515,41 @@ class NeonSyncService:
         # Calculate metrics - normalize timezone (remove tz info)
         df['created_at'] = pd.to_datetime(df['created_at']).dt.tz_localize(None)
         df['delivery_date'] = pd.to_datetime(df['delivery_date'], errors='coerce').dt.tz_localize(None)
+        df['current_odometer'] = pd.to_numeric(df['odometer'], errors='coerce').fillna(0)
         
-        # Duration in months
-        df['duration_months'] = ((df['created_at'] - df['delivery_date']).dt.days / 30.44).fillna(0).round(1)
+        # Sort by plate and pergantian_ke for proper LAG calculation
+        df = df.sort_values(['vehicle_plate', 'sku', 'pergantian_ke_total'])
+        
+        # Get previous replacement date and odometer per plate+sku using shift (LAG equivalent)
+        df['prev_replacement_date'] = df.groupby(['vehicle_plate', 'sku'])['created_at'].shift(1)
+        df['prev_odometer'] = df.groupby(['vehicle_plate', 'sku'])['current_odometer'].shift(1)
+        
+        # For pergantian ke-1: use delivery_date as baseline
+        # For pergantian ke-2+: use previous replacement date
+        df['baseline_date'] = df.apply(
+            lambda row: row['delivery_date'] if row['pergantian_ke_total'] == 1 or pd.isna(row['prev_replacement_date'])
+            else row['prev_replacement_date'],
+            axis=1
+        )
+        
+        # For KM: pergantian ke-1 uses delivery_odometer (0 if not available)
+        # For pergantian ke-2+: uses previous odometer
+        df['baseline_odometer'] = df.apply(
+            lambda row: 0 if row['pergantian_ke_total'] == 1 or pd.isna(row['prev_odometer'])
+            else row['prev_odometer'],
+            axis=1
+        )
+        
+        # Calculate incremental duration (months since previous replacement / delivery)
+        df['duration_months'] = ((df['created_at'] - df['baseline_date']).dt.days / 30.44).fillna(0).round(1)
         df['duration_months'] = df['duration_months'].apply(lambda x: max(0, x))
         
-        # Odometer metrics
-        df['current_odometer'] = pd.to_numeric(df['odometer'], errors='coerce').fillna(0)
-        df['delivery_odometer'] = 0  # Not available in current schema
-        df['odometer_diff'] = df['current_odometer']  # Just use current as "life"
+        # Calculate incremental odometer difference
+        df['odometer_diff'] = df['current_odometer'] - df['baseline_odometer']
+        df['odometer_diff'] = df['odometer_diff'].apply(lambda x: max(0, x))
+        
+        # Keep delivery_odometer as baseline reference (for display)
+        df['delivery_odometer'] = df['baseline_odometer']
         
         # Categorize GEL vs Non-GEL
         df['customer_category'] = np.where(
