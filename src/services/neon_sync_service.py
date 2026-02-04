@@ -78,6 +78,7 @@ class NeonSyncService:
     def run_incremental_sync(self) -> dict:
         """
         Run incremental sync with smart Pergantian Ke calculation.
+        Loads ALL source data for proper forward-fill, then inserts only new rows.
         Returns stats about the sync operation.
         """
         stats = {
@@ -91,7 +92,6 @@ class NeonSyncService:
         try:
             # --- PER-SOURCE TIMESTAMP TRACKING ---
             # Get last sync timestamp for EACH source independently
-            # This ensures Service Items and Part Usage don't block each other
             max_date_si = self.loader.get_max_created_at_by_source('Apps')
             max_date_pu = self.loader.get_max_created_at_by_source('Part Usage Sheet')
             
@@ -109,76 +109,95 @@ class NeonSyncService:
             asset_df = self.data_loader.load_gspread_data(SHEET_ID_ASSET_LIST, WORKSHEET_ASSET)
             mapping_df = self.data_loader.load_gspread_data(SHEET_ID_MAPPINGS, WORKSHEET_MAPPINGS)
             
-            # --- SERVICE ITEMS (Filter by SI's own max_date) ---
-            raw_si = self.data_loader.load_gspread_data(SHEET_ID_SERVICE_ITEMS, WORKSHEET_SERVICE_ITEMS)
-            if not raw_si.empty:
-                raw_si['created_at'] = pd.to_datetime(raw_si['created_at'], errors='coerce')
-                if max_date_filter_si:
-                    raw_si = raw_si[raw_si['created_at'] > max_date_filter_si]
-                
-                if not raw_si.empty:
-                    si_df = standardize_service_items(raw_si, asset_df=asset_df, mapping_df=mapping_df)
-                    stats['service_items_new'] = len(si_df)
-                else:
-                    si_df = pd.DataFrame()
-            else:
-                si_df = pd.DataFrame()
+            # --- LOAD ALL SOURCE DATA (for proper forward-fill) ---
+            print("   📥 Loading ALL source data for forward-fill...")
+            raw_si_all = self.data_loader.load_gspread_data(SHEET_ID_SERVICE_ITEMS, WORKSHEET_SERVICE_ITEMS)
+            raw_pu_all = self.data_loader.load_gspread_data(SHEET_ID_OUTPUT_REVIEW, WORKSHEET_PART_USAGE)
             
-            # --- PART USAGE (Filter by PU's own max_date) ---
-            raw_pu = self.data_loader.load_gspread_data(SHEET_ID_OUTPUT_REVIEW, WORKSHEET_PART_USAGE)
-            if not raw_pu.empty:
-                raw_pu['created_at'] = pd.to_datetime(raw_pu['created_at'], errors='coerce')
-                if max_date_filter_pu:
-                    raw_pu = raw_pu[raw_pu['created_at'] > max_date_filter_pu]
-                
-                if not raw_pu.empty:
-                    pu_df = standardize_part_usage(raw_pu, asset_df=asset_df, mapping_df=mapping_df)
-                    stats['part_usage_new'] = len(pu_df)
-                else:
-                    pu_df = pd.DataFrame()
-            else:
-                pu_df = pd.DataFrame()
+            # Standardize ALL data
+            si_all = standardize_service_items(raw_si_all, asset_df=asset_df, mapping_df=mapping_df) if not raw_si_all.empty else pd.DataFrame()
+            pu_all = standardize_part_usage(raw_pu_all, asset_df=asset_df, mapping_df=mapping_df) if not raw_pu_all.empty else pd.DataFrame()
             
-            # --- MERGE & TRANSFORM ---
-            if si_df.empty and pu_df.empty:
-                stats['status'] = 'no_new_data'
+            # Merge ALL data
+            all_unified = pd.concat([si_all, pu_all], ignore_index=True)
+            if all_unified.empty:
+                stats['status'] = 'no_source_data'
                 return stats
-            
-            # Create unified_df by merging Service Items and Part Usage
-            unified_df = pd.concat([si_df, pu_df], ignore_index=True)
             
             # --- STEP 2: EXCLUDE TEST/INVALID PLATES ---
             test_plates = [
                 'B 1234 XXX', 'B 3252 WWD', 'B 4086 SWF', 'B 4921 SVO', 'B 5050 BCA',
                 'B 9999 BLU', 'B 9999 GRE', 'EL 0015 H3', 'EL 1234 MKT'
             ]
-            before_exclude = len(unified_df)
-            unified_df = unified_df[~unified_df['vehicle_plate'].isin(test_plates)]
-            stats['test_plates_excluded'] = before_exclude - len(unified_df)
+            all_unified = all_unified[~all_unified['vehicle_plate'].isin(test_plates)]
             
-            # --- STEP 3: FORWARD FILL MISSING DATA ---
+            # --- STEP 3: FORWARD FILL ON ALL DATA ---
+            all_unified['created_at'] = pd.to_datetime(all_unified['created_at'], errors='coerce')
+            all_unified = all_unified.sort_values(['vehicle_plate', 'created_at'])
+            
             fill_cols = ['delivery_date', 'customer_type', 'bike_type']
             stats['forward_filled'] = {}
             for col in fill_cols:
-                if col in unified_df.columns:
-                    missing_before = unified_df[col].isna().sum()
-                    if missing_before > 0:
-                        unified_df = unified_df.sort_values(['vehicle_plate', 'created_at'])
-                        unified_df[col] = unified_df.groupby('vehicle_plate')[col].transform(
-                            lambda x: x.ffill().bfill()
-                        )
-                        missing_after = unified_df[col].isna().sum()
-                        stats['forward_filled'][col] = missing_before - missing_after
+                if col in all_unified.columns:
+                    missing_before = all_unified[col].isna().sum()
+                    all_unified[col] = all_unified.groupby('vehicle_plate')[col].transform(
+                        lambda x: x.ffill().bfill()
+                    )
+                    missing_after = all_unified[col].isna().sum()
+                    stats['forward_filled'][col] = missing_before - missing_after
             
             # --- STEP 4: FIX INCONSISTENT CUSTOMER_TYPE ---
             # Rule: L-prefix plate + H1 model = GEL
-            if 'customer_type' in unified_df.columns and 'bike_type' in unified_df.columns:
+            if 'customer_type' in all_unified.columns and 'bike_type' in all_unified.columns:
                 l_prefix_h1_mask = (
-                    unified_df['vehicle_plate'].astype(str).str.startswith('L ') & 
-                    (unified_df['bike_type'].astype(str).str.upper() == 'H1')
+                    all_unified['vehicle_plate'].astype(str).str.startswith('L ') & 
+                    (all_unified['bike_type'].astype(str).str.upper() == 'H1')
                 )
-                stats['customer_type_fixed'] = (unified_df.loc[l_prefix_h1_mask, 'customer_type'] != 'GEL').sum()
-                unified_df.loc[l_prefix_h1_mask, 'customer_type'] = 'GEL'
+                stats['customer_type_fixed'] = (all_unified.loc[l_prefix_h1_mask, 'customer_type'] != 'GEL').sum()
+                all_unified.loc[l_prefix_h1_mask, 'customer_type'] = 'GEL'
+            
+            # --- FILTER TO NEW DATA ONLY ---
+            # Now filter to rows that are newer than max_date per source
+            print("   🔍 Filtering to new data only...")
+            
+            # Tag source
+            if 'source_system' not in all_unified.columns:
+                all_unified['source_system'] = 'unknown'
+            
+            # Filter: SI new + PU new
+            si_mask = all_unified['source_system'].str.lower().str.contains('service|apps|item', na=False)
+            pu_mask = all_unified['source_system'].str.lower().str.contains('part|usage', na=False)
+            
+            new_rows = pd.DataFrame()
+            
+            if max_date_filter_si is not None:
+                si_new = all_unified[si_mask & (all_unified['created_at'] > max_date_filter_si)]
+                stats['service_items_new'] = len(si_new)
+                new_rows = pd.concat([new_rows, si_new], ignore_index=True)
+            else:
+                # No existing SI data, take all SI
+                si_new = all_unified[si_mask]
+                stats['service_items_new'] = len(si_new)
+                new_rows = pd.concat([new_rows, si_new], ignore_index=True)
+            
+            if max_date_filter_pu is not None:
+                pu_new = all_unified[pu_mask & (all_unified['created_at'] > max_date_filter_pu)]
+                stats['part_usage_new'] = len(pu_new)
+                new_rows = pd.concat([new_rows, pu_new], ignore_index=True)
+            else:
+                # No existing PU data, take all PU
+                pu_new = all_unified[pu_mask]
+                stats['part_usage_new'] = len(pu_new)
+                new_rows = pd.concat([new_rows, pu_new], ignore_index=True)
+            
+            # Check if we have new data
+            if new_rows.empty:
+                stats['status'] = 'no_new_data'
+                stats['message'] = 'All data already synced'
+                return stats
+            
+            unified_df = new_rows.copy()
+            stats['test_plates_excluded'] = 0  # Already excluded above
 
             # --- DEDUPLICATION (CROSS-SOURCE) BEFORE EXPLODE ---
             # Priority: WO- prefix (from Part Usage) is preferred over non-WO (Service Items)
