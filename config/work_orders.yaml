@@ -60,7 +60,6 @@ parts_columns_mapping:
     - 'Slow Moving Part (H1)'
   'S4_REQUEST_SPK':
     - 'Nama Sparepart'
-    - 'Item Pengerjaan'
   'S5_AFTER_REPAIR':
     - 'Sparepart yang diganti - H3 ONLY'
     - 'Sparepart yang diganti - H5 ONLY'
