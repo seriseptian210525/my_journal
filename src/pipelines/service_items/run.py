@@ -84,6 +84,11 @@ def run_service_items_pipeline():
     target_sheet_id = SHEET_ID_SERVICE_ITEMS
     
     if target_sheet_id and WORKSHEET_SERVICE_ITEMS:
+        # Sort by created_at ascending before upload
+        if 'created_at' in formatted_df.columns:
+            formatted_df = formatted_df.sort_values('created_at', ascending=True).reset_index(drop=True)
+            print(f"   📅 Sorted by created_at ASC")
+        
         # Upload formatted output to main sheet
         print(f"   Uploading formatted data to {WORKSHEET_SERVICE_ITEMS}...")
         loader.upload_to_sheet(formatted_df, target_sheet_id, WORKSHEET_SERVICE_ITEMS)
