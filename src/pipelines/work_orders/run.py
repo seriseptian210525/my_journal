@@ -127,6 +127,18 @@ def run_work_order_pipeline():
             print("   ℹ️ No new data to process. Exiting.")
             return
     
+    # [INCREMENTAL MODE] Fetch existing order_ids to avoid duplicates
+    existing_order_ids = set()
+    if PIPELINE_MODE == 'incremental' and SHEET_ID_OUTPUT and WORKSHEET_OUTPUT:
+        print("   📋 Fetching existing order_ids from sheet...")
+        try:
+            existing_df = loader.load_gspread_data(SHEET_ID_OUTPUT, WORKSHEET_OUTPUT)
+            if existing_df is not None and 'order_id' in existing_df.columns:
+                existing_order_ids = set(existing_df['order_id'].dropna().astype(str).unique())
+                print(f"   ✅ Found {len(existing_order_ids)} existing order_ids")
+        except Exception as e:
+            print(f"   ⚠️ Could not fetch existing IDs: {e}")
+    
     # 4. Enrichment & Business Logic
     print("\n🔗 Enriching & Cleaning...")
     enricher = ServiceDataEnricher(merged_df, asset_df)
@@ -145,7 +157,7 @@ def run_work_order_pipeline():
         .process_odometer()
         .standardize_mechanics(mekanik_df)
         .standardize_location_names(location_df)
-        .generate_snowflake_ids()
+        .generate_snowflake_ids(existing_order_ids)
         .randomize_working_hours()
         .normalize_service_type()
         .add_convert_customer_type_flag()

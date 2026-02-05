@@ -700,9 +700,20 @@ class ServiceDataEnricher:
         self.df['partner_name'] = self.df['customer_type'].apply(_get_partner)
         return self
 
-    def generate_snowflake_ids(self):
-
+    def generate_snowflake_ids(self, existing_ids: set = None):
+        """
+        Generate unique order_ids for each row.
+        
+        Args:
+            existing_ids: Set of existing order_ids to avoid duplicates (for incremental mode)
+        """
         print("🚀 Generating IDs (Deterministic)...")
+        
+        if existing_ids is None:
+            existing_ids = set()
+        else:
+            print(f"   Checking against {len(existing_ids)} existing IDs")
+        
         # Ensure created_at is datetime
         self.df['created_at'] = pd.to_datetime(self.df['created_at'])
         
@@ -713,16 +724,45 @@ class ServiceDataEnricher:
         # Using cumcount to get unique sequence for same timestamp
         self.df['id_sequence'] = self.df.groupby('created_at').cumcount()
         
-        # Apply generator with explicit sequence
-        self.df['order_id'] = self.df.apply(
-            lambda row: ServiceUtils.create_historical_snowflake_id(
-                row['created_at'], 
-                row['id_sequence']
-            ), axis=1
-        )
+        # Generate IDs with uniqueness check
+        generated_ids = set()
+        order_ids = []
+        
+        for _, row in self.df.iterrows():
+            base_sequence = row['id_sequence']
+            current_sequence = base_sequence
+            max_attempts = 10000  # Safety limit
+            
+            while max_attempts > 0:
+                new_id = ServiceUtils.create_historical_snowflake_id(
+                    row['created_at'], 
+                    current_sequence
+                )
+                
+                # Check if ID is unique (not in existing or already generated)
+                if new_id not in existing_ids and new_id not in generated_ids:
+                    generated_ids.add(new_id)
+                    order_ids.append(new_id)
+                    break
+                
+                # Try next sequence
+                current_sequence += 1
+                max_attempts -= 1
+            else:
+                # Fallback: use timestamp + random to guarantee uniqueness
+                import time
+                fallback_id = f"WO-{int(time.time() * 1000)}{random.randint(1000, 9999)}"
+                while fallback_id in existing_ids or fallback_id in generated_ids:
+                    fallback_id = f"WO-{int(time.time() * 1000)}{random.randint(1000, 9999)}"
+                generated_ids.add(fallback_id)
+                order_ids.append(fallback_id)
+        
+        self.df['order_id'] = order_ids
         
         # Cleanup
         self.df.drop(columns=['id_sequence'], inplace=True, errors='ignore')
+        
+        print(f"   Generated {len(order_ids)} unique IDs")
         return self
     
     def randomize_working_hours(self, start_hour: int = 8, end_hour: int = 17):
