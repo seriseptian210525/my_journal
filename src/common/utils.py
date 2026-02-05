@@ -37,12 +37,26 @@ class ServiceUtils:
 
     @staticmethod
     def combine_columns_to_string(row, columns_list):
+        """
+        Combine multiple columns into comma-separated string.
+        Deduplicates items while preserving order.
+        """
+        seen = set()
         parts = []
+        
         for col in columns_list:
             if col in row.index:
                 val = row[col]
                 if pd.notna(val) and str(val).strip() != '':
-                    parts.append(str(val).strip())
+                    # Split by comma in case the column contains multiple items
+                    items = str(val).split(',')
+                    for item in items:
+                        item_clean = item.strip()
+                        item_lower = item_clean.lower()
+                        if item_clean and item_lower not in seen:
+                            seen.add(item_lower)
+                            parts.append(item_clean)
+        
         return ', '.join(parts)
 
     @staticmethod
