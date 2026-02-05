@@ -146,6 +146,51 @@ class NeonSyncService:
                     missing_after = all_unified[col].isna().sum()
                     stats['forward_filled'][col] = missing_before - missing_after
             
+            # --- STEP 3b: BACKFILL FROM NEON EXISTING DATA ---
+            # For plates with missing data, lookup from existing Neon records
+            stats['neon_backfilled'] = {}
+            missing_plates = all_unified[
+                (all_unified['customer_type'].isna() | (all_unified['customer_type'] == '') | (all_unified['customer_type'] == 'nan')) |
+                (all_unified['bike_type'].isna() | (all_unified['bike_type'] == '') | (all_unified['bike_type'] == 'nan'))
+            ]['vehicle_plate'].unique()
+            
+            if len(missing_plates) > 0:
+                print(f"   🔍 Looking up {len(missing_plates)} plates from Neon...")
+                # Query Neon for existing data on these plates
+                plates_list = "', '".join([str(p).replace("'", "''") for p in missing_plates[:500]])  # Limit to 500 for safety
+                neon_lookup = self.loader.fetch_df(f"""
+                    SELECT DISTINCT ON (vehicle_plate) 
+                        vehicle_plate, customer_type, bike_type, delivery_date
+                    FROM unified_part_logs
+                    WHERE vehicle_plate IN ('{plates_list}')
+                        AND (customer_type IS NOT NULL AND customer_type != '' AND customer_type != 'nan')
+                    ORDER BY vehicle_plate, created_at DESC
+                """)
+                
+                if not neon_lookup.empty:
+                    # Create lookup dict
+                    neon_dict = neon_lookup.set_index('vehicle_plate').to_dict('index')
+                    
+                    for col in fill_cols:
+                        if col in all_unified.columns:
+                            missing_before = (all_unified[col].isna() | (all_unified[col] == '') | (all_unified[col] == 'nan')).sum()
+                            
+                            # Fill from Neon lookup
+                            def fill_from_neon(row):
+                                if pd.isna(row[col]) or row[col] in ['', 'nan', 'None']:
+                                    plate = row['vehicle_plate']
+                                    if plate in neon_dict and col in neon_dict[plate]:
+                                        neon_val = neon_dict[plate][col]
+                                        if pd.notna(neon_val) and neon_val not in ['', 'nan', 'None']:
+                                            return neon_val
+                                return row[col]
+                            
+                            all_unified[col] = all_unified.apply(fill_from_neon, axis=1)
+                            missing_after = (all_unified[col].isna() | (all_unified[col] == '') | (all_unified[col] == 'nan')).sum()
+                            stats['neon_backfilled'][col] = missing_before - missing_after
+                    
+                    print(f"   ✅ Neon backfill: {stats['neon_backfilled']}")
+            
             # --- STEP 4: FIX INCONSISTENT CUSTOMER_TYPE ---
             # Rule: L-prefix plate + H1 model = GEL
             if 'customer_type' in all_unified.columns and 'bike_type' in all_unified.columns:
