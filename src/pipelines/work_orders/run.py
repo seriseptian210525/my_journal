@@ -238,8 +238,8 @@ def run_work_order_pipeline():
     # 8. Upload to Google Sheets
     print("\n☁️ Uploading to Google Sheets...")
     
-    # Define deduplication keys
-    dedup_keys = ['order_id', 'vehicle_vin', 'vehicle_license_plate']
+    # Define deduplication keys - order_id should be unique
+    dedup_keys = ['order_id']
     
     if SHEET_ID_OUTPUT and WORKSHEET_OUTPUT:
         if PIPELINE_MODE == 'incremental':
