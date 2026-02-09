@@ -14,8 +14,15 @@ if __name__ == "__main__":
         "--pipeline", 
         type=str, 
         default="work_orders", 
-        choices=["work_orders", "service_items", "wo_activity"],
+        choices=["work_orders", "service_items", "wo_activity", "neon_sync"],
         help="Name of the pipeline to run"
+    )
+    parser.add_argument(
+        "--mode",
+        type=str,
+        default="full",
+        choices=["full", "incremental", "recalculate"],
+        help="Pipeline mode (for neon_sync): full=truncate+refresh, incremental=append new, recalculate=upsert"
     )
     args = parser.parse_args()
 
@@ -30,3 +37,9 @@ if __name__ == "__main__":
         
     elif args.pipeline == "wo_activity":
         print("🚧 Pipeline 'wo_activity' is under construction.")
+    
+    elif args.pipeline == "neon_sync":
+        os.environ['PIPELINE_MODE'] = args.mode
+        print(f"🚀 Running Neon Sync Pipeline (Mode: {args.mode.upper()})...")
+        from src.pipelines.neon_sync.run import run_pipeline
+        run_pipeline()

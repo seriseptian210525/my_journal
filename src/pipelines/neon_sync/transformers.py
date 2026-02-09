@@ -372,33 +372,62 @@ def standardize_service_items(df, asset_df=pd.DataFrame(), mapping_df=pd.DataFra
         
         out = merged
     
-    # BIKE_TYPE ENRICHMENT from Asset List
+    # ASSET LIST ENRICHMENT (bike_type, customer_type fallback, delivery_date)
     if not asset_df.empty:
         # Robust Join: Remove spaces for matching
         out['join_plate'] = out['vehicle_plate'].str.strip().str.upper().str.replace(' ', '')
         asset_clean = asset_df.copy()
         asset_clean['join_plate'] = asset_clean['Plat Nomor'].astype(str).str.strip().str.upper().str.replace(' ', '')
         asset_clean['asset_model'] = asset_clean['Model'].astype(str).str.slice(0, 50)
+        asset_clean['asset_customer_type'] = asset_clean['Tempat Sewa Unit'].astype(str).str.slice(0, 100)
+        
+        # Delivery date - try multiple column names
+        delivery_col = None
+        for col in ['Delivery - Outbone', 'Delivery Date', 'delivery_date']:
+            if col in asset_clean.columns:
+                delivery_col = col
+                break
+        if delivery_col:
+            asset_clean['asset_delivery_date'] = pd.to_datetime(asset_clean[delivery_col], errors='coerce')
+        else:
+            asset_clean['asset_delivery_date'] = pd.NaT
+        
         asset_clean = asset_clean.drop_duplicates(subset=['join_plate'])
         
-        merged = pd.merge(out, asset_clean[['join_plate', 'asset_model']], on='join_plate', how='left')
+        merged = pd.merge(out, asset_clean[['join_plate', 'asset_model', 'asset_customer_type', 'asset_delivery_date']], on='join_plate', how='left')
+        
         # Fill bike_type where empty
         merged['bike_type'] = merged.apply(
             lambda r: r['asset_model'] if (pd.isna(r['bike_type']) or r['bike_type'] in ['', 'nan', 'None']) else r['bike_type'],
             axis=1
         )
-        out = merged.drop(columns=['asset_model', 'join_plate'], errors='ignore')
+        
+        # Fill customer_type where empty (fallback to Asset List)
+        merged['customer_type'] = merged.apply(
+            lambda r: r['asset_customer_type'] if (pd.isna(r['customer_type']) or r['customer_type'] in ['', 'nan', 'None']) else r['customer_type'],
+            axis=1
+        )
+        
+        # Set delivery_date from Asset List
+        merged['delivery_date'] = merged['asset_delivery_date']
+        
+        out = merged.drop(columns=['asset_model', 'asset_customer_type', 'asset_delivery_date', 'join_plate'], errors='ignore')
+    else:
+        out['delivery_date'] = pd.NaT
     
     out['source_system'] = 'service_items'
     out['created_at'] = pd.to_datetime(out['created_at'])
     
-    # Select columns
+    # Select columns (including delivery_date)
     final_cols = ['source_system', 'created_at', 'order_number', 'vehicle_plate', 'sku', 'item_name', 'erp_product_id',
                   'item_type', 'service_type', 'service_location_name', 'completed_by', 'customer_type',
                   'quantity', 'unit_price', 'final_price', 'subtotal_price', 'old_price',
-                  'warranty_status', 'status', 'odometer', 'bike_type']
+                  'warranty_status', 'status', 'odometer', 'bike_type', 'delivery_date']
                   
     # Fill missing cols if any
+    for col in final_cols:
+        if col not in out.columns:
+            out[col] = None
     return out[final_cols]
 
 def standardize_part_usage(df, asset_df=pd.DataFrame(), mapping_df=pd.DataFrame()):
@@ -441,29 +470,47 @@ def standardize_part_usage(df, asset_df=pd.DataFrame(), mapping_df=pd.DataFrame(
     else:
         out['bike_type'] = ''
 
-    # CUSTOMER TYPE ENRICHMENT
+    # ASSET LIST ENRICHMENT (customer_type, bike_type, delivery_date)
     if not asset_df.empty:
         # Robust Join: Remove spaces for matching
         out['join_plate'] = out['vehicle_plate'].str.strip().str.upper().str.replace(' ', '')
         asset_clean = asset_df.copy()
         asset_clean['join_plate'] = asset_clean['Plat Nomor'].astype(str).str.strip().str.upper().str.replace(' ', '')
         
-        # Deduplicate asset list? Assume 1 plate = 1 customer type?
-        # Drop duplicates on plate to ensure 1:1 join
+        # Prepare columns
+        asset_clean['asset_customer_type'] = asset_clean['Tempat Sewa Unit'].astype(str).str.slice(0, 100)
+        asset_clean['asset_model'] = asset_clean['Model'].astype(str).str.slice(0, 50)
+        
+        # Delivery date - try multiple column names
+        delivery_col = None
+        for col in ['Delivery - Outbone', 'Delivery Date', 'delivery_date']:
+            if col in asset_clean.columns:
+                delivery_col = col
+                break
+        if delivery_col:
+            asset_clean['asset_delivery_date'] = pd.to_datetime(asset_clean[delivery_col], errors='coerce')
+        else:
+            asset_clean['asset_delivery_date'] = pd.NaT
+        
+        # Deduplicate asset list - 1 plate = 1 record
         asset_clean = asset_clean.drop_duplicates(subset=['join_plate'])
         
-        merged = pd.merge(out, asset_clean[['join_plate', 'Tempat Sewa Unit', 'Model']], on='join_plate', how='left')
-        merged['customer_type'] = merged['Tempat Sewa Unit'].fillna('')
+        merged = pd.merge(out, asset_clean[['join_plate', 'asset_customer_type', 'asset_model', 'asset_delivery_date']], on='join_plate', how='left')
+        merged['customer_type'] = merged['asset_customer_type'].fillna('')
         
         # BIKE_TYPE Enrichment
-        merged['asset_model'] = merged['Model'].astype(str).str.slice(0, 50)
         merged['bike_type'] = merged.apply(
             lambda r: r['asset_model'] if (pd.isna(r['bike_type']) or r['bike_type'] in ['', 'nan', 'None']) else r['bike_type'],
             axis=1
         )
-        out = merged.drop(columns=['Tempat Sewa Unit', 'Model', 'asset_model', 'join_plate'], errors='ignore')
+        
+        # DELIVERY_DATE from Asset List
+        merged['delivery_date'] = merged['asset_delivery_date']
+        
+        out = merged.drop(columns=['asset_customer_type', 'asset_model', 'asset_delivery_date', 'join_plate'], errors='ignore')
     else:
         out['customer_type'] = ''
+        out['delivery_date'] = pd.NaT
 
     # OLD PRICE ENRICHMENT
     out['old_price'] = 0.0 # Default
@@ -487,6 +534,10 @@ def standardize_part_usage(df, asset_df=pd.DataFrame(), mapping_df=pd.DataFrame(
     final_cols = ['source_system', 'created_at', 'order_number', 'vehicle_plate', 'sku', 'item_name', 'erp_product_id',
                   'item_type', 'service_type', 'service_location_name', 'completed_by', 'customer_type',
                   'quantity', 'unit_price', 'final_price', 'subtotal_price', 'old_price',
-                  'warranty_status', 'status', 'odometer', 'bike_type']
+                  'warranty_status', 'status', 'odometer', 'bike_type', 'delivery_date']
 
+    # Fill missing cols if any
+    for col in final_cols:
+        if col not in out.columns:
+            out[col] = None
     return out[final_cols]

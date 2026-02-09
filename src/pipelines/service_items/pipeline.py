@@ -513,6 +513,12 @@ class ServiceItemsPipeline:
         else:
             output_df['Customer Type'] = ''
         
+        # Add delivery_date from Delivery - Outbone
+        if 'Delivery - Outbone' in output_df.columns:
+            output_df['delivery_date'] = pd.to_datetime(output_df['Delivery - Outbone'], errors='coerce')
+        else:
+            output_df['delivery_date'] = pd.NaT
+        
         # Rename columns for output
         column_mapping = {
             'order_id': 'Order Number',
@@ -558,7 +564,8 @@ class ServiceItemsPipeline:
             'completed_by',
             'Pergantian Ke',   # Re-added as array string
             'Customer Type',   # Added per user request
-            'Old Price'        # Added per user request (from Landed Price)
+            'Old Price',       # Added per user request (from Landed Price)
+            'delivery_date'    # Added for enrichment
         ]
         
         # Select only columns that exist
