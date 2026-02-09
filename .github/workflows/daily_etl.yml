@@ -13,6 +13,7 @@ on:
           - all
           - work_orders
           - service_items
+          - gel_sync
       mode:
         description: 'Pipeline mode (full = clear & replace, incremental = append only)'
         required: true
@@ -28,6 +29,9 @@ on:
     - cron: '0 17 * * *'
     # Service Items: Jam 18:00 UTC = 01:00 WIB (1 jam setelah work_orders)
     - cron: '0 18 * * *'
+    # GEL Sync: Jam 04:00 UTC = 11:00 WIB (Jumat only)
+    - cron: '0 4 * * 5'
+
 
 jobs:
   # ========================================
@@ -152,6 +156,52 @@ jobs:
       
       - name: Run Service Items Pipeline
         run: python -m src.pipelines.service_items.run
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: "./google_credentials.json"
+      
+      - name: Cleanup Credentials
+        if: always()
+        run: rm -f google_credentials.json
+
+  # ========================================
+  # Job 3: GEL Sync to Google Sheets
+  # ========================================
+  gel-sync:
+    runs-on: ubuntu-latest
+    # Run if: scheduled Friday at 04:00 UTC OR manual with 'all' or 'gel_sync'
+    if: >-
+      github.event_name == 'schedule' && contains(github.event.schedule, '4') && contains(github.event.schedule, '5') ||
+      github.event_name == 'workflow_dispatch' && (github.event.inputs.pipeline == 'all' || github.event.inputs.pipeline == 'gel_sync')
+    
+    env:
+      # GEL/Grab Sync Config
+      GRAB_ID_SHEET: ${{ secrets.GRAB_ID_SHEET }}
+      SERVICE_HISTORY_GRAB: "SERVICE HISTORY GRAB"
+      
+      # Neon Connection
+      NEON_DB_CONNECTION_STRING: ${{ secrets.NEON_DB_CONNECTION_STRING }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Create Google Credentials File
+        run: |
+          echo '${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}' > google_credentials.json
+      
+      - name: Run GEL Sync to Google Sheets
+        run: python -m entrypoint.sync_gel_to_sheets
         env:
           GOOGLE_APPLICATION_CREDENTIALS: "./google_credentials.json"
       
