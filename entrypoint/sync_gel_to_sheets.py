@@ -82,9 +82,15 @@ def recalculate_warranty(df, mapping_df):
     """
     print("   🔧 Recalculating warranty coverage...")
     
-    # Ensure created_at is datetime for sorting
+    # Ensure created_at and delivery_date are datetime AND tz-naive
+    # Neon returns tz-aware timestamps, delivery_date may be tz-naive → normalize both
     df['created_at'] = pd.to_datetime(df['created_at'], errors='coerce')
     df['delivery_date'] = pd.to_datetime(df['delivery_date'], errors='coerce')
+    
+    if df['created_at'].dt.tz is not None:
+        df['created_at'] = df['created_at'].dt.tz_localize(None)
+    if df['delivery_date'].dt.tz is not None:
+        df['delivery_date'] = df['delivery_date'].dt.tz_localize(None)
     
     # Recalculate using existing transformer logic
     # skip_sequence_calc=False → recalculates pergantian_ke_total and pergantian_ke_yearly
