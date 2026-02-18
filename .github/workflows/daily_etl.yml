@@ -180,6 +180,10 @@ jobs:
       
       # Neon Connection
       NEON_DB_CONNECTION_STRING: ${{ secrets.NEON_DB_CONNECTION_STRING }}
+      
+      # Mappings (for warranty recalculation)
+      SHEET_ID_MAPPINGS: ${{ secrets.SHEET_ID_MAPPINGS }}
+      WORKSHEET_MAPPINGS: "Mappings"
 
     steps:
       - name: Checkout Repository
