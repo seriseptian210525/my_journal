@@ -57,20 +57,31 @@ DEDUP_COLUMNS = ['created_date', 'vehicle_plate', 'item_name', 'service_location
 
 def dedup_gel_data(df):
     """
-    Remove duplicates where same date (ignoring time), vehicle_plate,
+    Remove duplicate ORDERS where same date (ignoring time), vehicle_plate,
     item_name, service_location_name but different order_number.
-    Keep first occurrence.
+    
+    Keeps ALL rows from the FIRST order_number per group.
+    This preserves exploded quantity (e.g. qty=2 → 2 rows kept from 1 order).
     """
     before = len(df)
     
-    # Create date-only column for dedup
+    group_cols = ['created_date', 'vehicle_plate', 'item_name', 'service_location_name']
+    
+    # Create date-only column for grouping
     df['created_date'] = pd.to_datetime(df['created_at']).dt.date
     
-    df = df.drop_duplicates(subset=DEDUP_COLUMNS, keep='first')
-    df = df.drop(columns=['created_date'])
+    # For each group, get the first order_number (the one to keep)
+    first_orders = df.groupby(group_cols)['order_number'].first().reset_index()
+    first_orders = first_orders.rename(columns={'order_number': '_keep_order'})
+    
+    # Merge back and keep only rows matching the first order
+    df = df.merge(first_orders, on=group_cols, how='left')
+    df = df[df['order_number'] == df['_keep_order']]
+    df = df.drop(columns=['_keep_order', 'created_date'])
+    df = df.reset_index(drop=True)
     
     removed = before - len(df)
-    print(f"   🔄 Dedup: {before} → {len(df)} rows ({removed} duplicates removed)")
+    print(f"   🔄 Dedup: {before} → {len(df)} rows ({removed} duplicate-order rows removed)")
     
     return df
 
