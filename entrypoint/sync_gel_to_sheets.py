@@ -21,7 +21,7 @@ sys.path.append(str(project_root))
 from src.common.data_loader import DataLoader
 from src.pipelines.neon_sync.loader import NeonLoader
 from src.pipelines.neon_sync.transformers import calculate_warranty_coverage
-from src.common.config import SHEET_ID_MAPPINGS, WORKSHEET_MAPPINGS
+from src.common.config import SHEET_ID_MAPPINGS, WORKSHEET_MAPPINGS, SHEET_ID_ASSET_LIST, WORKSHEET_ASSET
 
 # Config from env
 GRAB_ID_SHEET = os.getenv('GRAB_ID_SHEET', 'your_sheet_id_here')
@@ -86,10 +86,11 @@ def dedup_gel_data(df):
     return df
 
 
-def recalculate_warranty(df, mapping_df):
+def recalculate_warranty(df, mapping_df, asset_df=None):
     """
     Recalculate pergantian_ke_total, pergantian_ke_yearly, and warranty_coverage
     after dedup changes row counts.
+    Also enriches missing delivery_date from Asset List.
     """
     print("   🔧 Recalculating warranty coverage...")
     
@@ -104,10 +105,11 @@ def recalculate_warranty(df, mapping_df):
         df['delivery_date'] = df['delivery_date'].dt.tz_localize(None)
     
     # Recalculate using existing transformer logic
+    # asset_df → fills missing delivery_date from Asset List
     # skip_sequence_calc=False → recalculates pergantian_ke_total and pergantian_ke_yearly
     df = calculate_warranty_coverage(
         df,
-        asset_df=None,       # delivery_date already in data, no need to re-join
+        asset_df=asset_df,
         mapping_df=mapping_df,
         skip_sequence_calc=False
     )
@@ -150,11 +152,20 @@ def sync_gel_to_sheets():
     print("\n🔄 Step 2: Removing duplicates...")
     df = dedup_gel_data(df)
     
-    # --- Step 3: Load Mappings & Recalculate Warranty ---
+    # --- Step 3: Load Mappings + Asset List & Recalculate Warranty ---
     print("\n🔧 Step 3: Recalculating warranty coverage...")
     mapping_df = dl.load_gspread_data(SHEET_ID_MAPPINGS, WORKSHEET_MAPPINGS)
     print(f"   📚 Loaded {len(mapping_df)} mapping rows")
-    df = recalculate_warranty(df, mapping_df)
+    
+    # Load Asset List to fill missing delivery_date
+    asset_df = None
+    try:
+        asset_df = dl.load_gspread_data(SHEET_ID_ASSET_LIST, WORKSHEET_ASSET)
+        print(f"   📚 Loaded {len(asset_df)} asset rows")
+    except Exception as e:
+        print(f"   ⚠️ Could not load Asset List: {e}")
+    
+    df = recalculate_warranty(df, mapping_df, asset_df=asset_df)
     
     # --- Step 4: Prepare & Upload ---
     print("\n📤 Step 4: Uploading to Google Sheet...")
