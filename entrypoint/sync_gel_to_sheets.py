@@ -170,6 +170,9 @@ def sync_gel_to_sheets():
     # --- Step 4: Prepare & Upload ---
     print("\n📤 Step 4: Uploading to Google Sheet...")
     
+    # Sort by created_at ASC for sheet output
+    df = df.sort_values('created_at').reset_index(drop=True)
+    
     # Ensure correct column order
     df = df[[c for c in FINAL_COLUMNS if c in df.columns]]
     
