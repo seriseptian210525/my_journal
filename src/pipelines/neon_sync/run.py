@@ -26,6 +26,11 @@ from src.common.config import (
     SHEET_ID_OUTPUT_REVIEW, WORKSHEET_PART_USAGE
 )
 
+from dotenv import load_dotenv
+load_dotenv()
+
+GDRIVE_OUTPUT_FOLDER_ID = os.environ.get("GDRIVE_OUTPUT_FOLDER_ID", "1lLb2vjbsccIMvL6LCFdvPxYwroIkMr2S")
+
 def run_pipeline():
     """
     Main Neon Sync Pipeline with Warranty Recalculation.
@@ -39,7 +44,7 @@ def run_pipeline():
     pipeline_mode = os.getenv('PIPELINE_MODE', 'full').lower()
     
     print(f"🚀 Starting Neon Sync Pipeline (Mode: {pipeline_mode.upper()})...")
-    loader = NeonLoader()
+    
     dl = DataLoader()
     
     # --- 0. PRELOAD AUXILIARY DATA (Enrichment Sources) ---
@@ -149,6 +154,50 @@ def run_pipeline():
                 if filled > 0:
                     print(f"   ✅ Forward-filled {filled} missing {col} values")
     
+    # --- FALLBACK MISSING DATA FROM ASSET LIST ---
+    print("   🔍 Checking for remaining missing data against Asset List...")
+    if asset_df is not None and not asset_df.empty:
+        asset_clean = asset_df.copy()
+        
+        # Try different column names for plate
+        asset_plate_col = None
+        for col in ['Plat Nomor', 'Plate Number', 'vehicle_license_plate']:
+            if col in asset_clean.columns:
+                asset_plate_col = col
+                break
+                
+        asset_customer_col = 'Jenis Customer' if 'Jenis Customer' in asset_clean.columns else None
+        asset_bike_type_col = 'Type Motor' if 'Type Motor' in asset_clean.columns else None
+        
+        if asset_plate_col and (asset_customer_col or asset_bike_type_col):
+            asset_clean['join_plate'] = asset_clean[asset_plate_col].astype(str).str.strip().str.upper().str.replace(' ', '')
+            asset_clean = asset_clean.drop_duplicates(subset=['join_plate'])
+            unified_df['join_plate'] = unified_df['vehicle_plate'].astype(str).str.strip().str.upper().str.replace(' ', '')
+            
+            # Fallback customer_type
+            if asset_customer_col and 'customer_type' in unified_df.columns:
+                missing_ct = unified_df['customer_type'].isna() | (unified_df['customer_type'] == '')
+                if missing_ct.any():
+                    ct_map = dict(zip(asset_clean['join_plate'], asset_clean[asset_customer_col]))
+                    unified_df.loc[missing_ct, 'customer_type'] = unified_df.loc[missing_ct, 'join_plate'].map(ct_map).fillna('')
+                    still_missing_ct = unified_df['customer_type'].isna() | (unified_df['customer_type'] == '')
+                    if still_missing_ct.any():
+                        unified_df.loc[still_missing_ct, 'customer_type'] = 'UNKNOWN'
+                    print(f"   🔧 Fallback mapped {missing_ct.sum() - still_missing_ct.sum()} missing customer_type from Asset List.")
+            
+            # Fallback bike_type
+            if asset_bike_type_col and 'bike_type' in unified_df.columns:
+                missing_bt = unified_df['bike_type'].isna() | (unified_df['bike_type'] == '')
+                if missing_bt.any():
+                    bt_map = dict(zip(asset_clean['join_plate'], asset_clean[asset_bike_type_col]))
+                    unified_df.loc[missing_bt, 'bike_type'] = unified_df.loc[missing_bt, 'join_plate'].map(bt_map).fillna('')
+                    still_missing_bt = unified_df['bike_type'].isna() | (unified_df['bike_type'] == '')
+                    if still_missing_bt.any():
+                        unified_df.loc[still_missing_bt, 'bike_type'] = 'UNKNOWN'
+                    print(f"   🔧 Fallback mapped {missing_bt.sum() - still_missing_bt.sum()} missing bike_type from Asset List.")
+            
+            unified_df = unified_df.drop(columns=['join_plate'])
+    
     # --- FIX INCONSISTENT CUSTOMER_TYPE ---
     # Rule: L-prefix plate + H1 model = GEL (from Asset List master convention)
     if 'customer_type' in unified_df.columns and 'bike_type' in unified_df.columns:
@@ -236,37 +285,24 @@ def run_pipeline():
 
     # SORT GLOBAL BY CREATED_AT (ASC)
     # Ensure ID 1 corresponds to earliest date (2024)
-    print("   Sorting globally by created_at (ASC) for ID sequence...")
-    final_df.sort_values(by='created_at', ascending=True, inplace=True)
+    print("   Sorting globally by created_at (ASC) and sequence for ID sequence stability...")
+    final_df.sort_values(by=['created_at', 'vehicle_plate', 'pergantian_ke_total'], ascending=[True, True, True], inplace=True)
 
-    # --- 6. LOAD TO NEON ---
-    print("\n💾 Loading to Neon...")
+    # --- 6. EXPORT TO GOOGLE DRIVE (CSV) ---
+    print("\n💾 Exporting to Google Drive (CSV)...")
     
     try:
-        if pipeline_mode == 'full':
-            # FULL REFRESH: Truncate + Insert
-            loader.truncate_table('unified_part_logs')
-            loader.load_df_append(final_df, 'unified_part_logs')
-            print(f"   ✅ Full refresh completed: {len(final_df)} rows loaded.")
-            
-        elif pipeline_mode == 'recalculate':
-            # RECALCULATE: Upsert (update existing + insert new)
-            print("   Using UPSERT for recalculation...")
-            loader.upsert_df(final_df, 'unified_part_logs')
-            print(f"   ✅ Recalculation completed: {len(final_df)} rows upserted.")
-            
-        else:
-            # INCREMENTAL: Append only (no truncate)
-            print("   Appending new data (Incremental)...")
-            loader.load_df_append(final_df, 'unified_part_logs')
-            print(f"   ✅ Incremental load completed: {len(final_df)} rows appended.")
+        from datetime import datetime
+        now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"unified_part_logs_latest.csv" # Overwrite same file for dashboard integration
         
-        # Show final row count
-        total_rows = loader.get_row_count('unified_part_logs')
-        print(f"   📊 Total rows in Neon: {total_rows}")
+        file_id = dl.upload_csv_to_drive(final_df, GDRIVE_OUTPUT_FOLDER_ID, filename)
+        
+        print(f"   📊 Total rows exported: {len(final_df)}")
+        print(f"   ✅ Export successful. Google Drive File ID: {file_id}")
         
     except Exception as e:
-        print(f"❌ Error Loading to Neon: {e}")
+        print(f"❌ Error Exporting to Google Drive: {e}")
         raise e
         
     print("\n✨ Pipeline Finished.")

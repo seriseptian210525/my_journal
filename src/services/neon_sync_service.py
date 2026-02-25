@@ -39,15 +39,40 @@ class NeonSyncService:
     
     def __init__(self):
         self.loader = NeonLoader()
-        self._data_loader = None  # Lazy load - only needed for sync
+        self._data_loader = None  # Lazy load
+        self._cached_df = None # RAM cache for the drive export
+        self.gdrive_folder_id = os.environ.get("GDRIVE_OUTPUT_FOLDER_ID", "1lLb2vjbsccIMvL6LCFdvPxYwroIkMr2S")
+        self.gdrive_filename = "unified_part_logs_latest.csv"
     
     @property
     def data_loader(self):
-        """Lazy load DataLoader only when needed (requires Google credentials)."""
+        """Lazy load DataLoader only when needed."""
         if self._data_loader is None:
             self._data_loader = DataLoader()
         return self._data_loader
-    
+        
+    def _get_drive_dataframe(self):
+        """Fetches the latest CSV from Google Drive, caches it in memory."""
+        if self._cached_df is not None:
+            return self._cached_df
+            
+        try:
+            print("📥 Fetching latest data from Google Drive instead of Neon...")
+            # We use streamlit cache indirectly by caching it at the service level, 
+            # but for true streamlit caching we'll wrap it in the UI file.
+            self._cached_df = self.data_loader.load_csv_from_drive(self.gdrive_folder_id, self.gdrive_filename)
+            
+            # Ensure critical datetime columns
+            if 'created_at' in self._cached_df.columns:
+                self._cached_df['created_at'] = pd.to_datetime(self._cached_df['created_at'], errors='coerce')
+            if 'delivery_date' in self._cached_df.columns:
+                self._cached_df['delivery_date'] = pd.to_datetime(self._cached_df['delivery_date'], errors='coerce')
+                
+            return self._cached_df
+        except Exception as e:
+            print(f"❌ Failed to load from Google Drive: {e}")
+            return pd.DataFrame()
+
     def get_max_total_pk(self) -> pd.DataFrame:
         """
         Get MAX pergantian_ke_total per (vehicle_plate, sku) from Neon.
@@ -585,144 +610,129 @@ class NeonSyncService:
         
         return stats
     
+    def _apply_filters_to_df(self, df: pd.DataFrame, filters: dict) -> pd.DataFrame:
+        if df.empty or not filters:
+            return df
+            
+        filtered = df.copy()
+        
+        if filters.get('vehicle_plate') and filters['vehicle_plate'] != 'All':
+            filtered = filtered[filtered['vehicle_plate'] == filters['vehicle_plate']]
+            
+        if filters.get('order_number'):
+            filtered = filtered[filtered['order_number'].astype(str).str.contains(filters['order_number'], case=False, na=False)]
+            
+        if filters.get('service_location_name') and filters['service_location_name'] != 'All':
+            filtered = filtered[filtered['service_location_name'] == filters['service_location_name']]
+            
+        if filters.get('item_name') and filters['item_name'] != 'All':
+            filtered = filtered[filtered['item_name'] == filters['item_name']]
+            
+        if filters.get('customer_type') and filters['customer_type'] != 'All':
+            filtered = filtered[filtered['customer_type'] == filters['customer_type']]
+            
+        if filters.get('warranty_coverage') and filters['warranty_coverage'] != 'All':
+            filtered = filtered[filtered['warranty_coverage'] == filters['warranty_coverage']]
+            
+        if filters.get('sku') and filters['sku'] != 'All':
+            filtered = filtered[filtered['sku'] == filters['sku']]
+            
+        if filters.get('start_date'):
+            filtered = filtered[filtered['created_at'] >= pd.to_datetime(filters['start_date'])]
+            
+        if filters.get('end_date'):
+            filtered = filtered[filtered['created_at'] <= pd.to_datetime(filters['end_date'])]
+            
+        if filters.get('location_category'):
+            cat = filters['location_category']
+            locs = filtered['service_location_name'].astype(str).str.lower()
+            if cat == 'B2B Repair':
+                filtered = filtered[locs.str.contains('grab', na=False)]
+            elif cat == 'Internal Repair':
+                filtered = filtered[
+                    locs.str.contains('pondok indah', na=False) |
+                    locs.str.contains('kembangan', na=False) |
+                    locs.str.contains('depok', na=False) |
+                    locs.str.contains('bekasi', na=False)
+                ]
+            elif cat == 'Official Partner':
+                filtered = filtered[
+                    ~locs.str.contains('grab', na=False) &
+                    ~locs.str.contains('pondok indah', na=False) &
+                    ~locs.str.contains('kembangan', na=False) &
+                    ~locs.str.contains('depok', na=False) &
+                    ~locs.str.contains('bekasi', na=False)
+                ]
+                
+        if filters.get('exclude_skus'):
+            filtered = filtered[~filtered['sku'].isin(filters['exclude_skus'])]
+            
+        return filtered
+
     def get_data_for_display(self, filters: dict = None, page: int = 1, page_size: int = 50) -> tuple:
         """
-        Get data from Neon for Streamlit display with filters and pagination.
+        Get data from Google Drive for Streamlit display with filters and pagination.
         Returns (dataframe, total_count).
         """
-        # Build WHERE clause
-        where_clauses = []
-        params = {}
+        df = self._get_drive_dataframe()
+        if df.empty:
+            return df, 0
+            
+        filtered_df = self._apply_filters_to_df(df, filters)
         
-        if filters:
-            if filters.get('vehicle_plate') and filters['vehicle_plate'] != 'All':
-                where_clauses.append("vehicle_plate = :plate")
-                params['plate'] = filters['vehicle_plate']
+        # Sort by created_at DESC
+        filtered_df = filtered_df.sort_values(by='created_at', ascending=False)
+        total_count = len(filtered_df)
+        
+        # Paginate
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+        paginated_df = filtered_df.iloc[start_idx:end_idx].copy()
+        
+        # Standardize warranty_status col name for display
+        if 'warranty_coverage' in paginated_df.columns:
+            paginated_df['warranty_status'] = paginated_df['warranty_coverage']
             
-            if filters.get('order_number'):
-                where_clauses.append("order_number ILIKE :order")
-                params['order'] = f"%{filters['order_number']}%"
-            
-            if filters.get('service_location_name') and filters['service_location_name'] != 'All':
-                where_clauses.append("service_location_name = :location")
-                params['location'] = filters['service_location_name']
-            
-            if filters.get('item_name') and filters['item_name'] != 'All':
-                where_clauses.append("item_name = :item")
-                params['item'] = filters['item_name']
-            
-            if filters.get('customer_type') and filters['customer_type'] != 'All':
-                where_clauses.append("customer_type = :cust")
-                params['cust'] = filters['customer_type']
-            
-            if filters.get('warranty_coverage') and filters['warranty_coverage'] != 'All':
-                where_clauses.append("warranty_coverage = :warranty")
-                params['warranty'] = filters['warranty_coverage']
-            
-            if filters.get('sku') and filters['sku'] != 'All':
-                where_clauses.append("sku = :sku")
-                params['sku'] = filters['sku']
+        # Select required columns
+        display_cols = [
+            'created_at', 'source_system', 'order_number', 'vehicle_plate', 
+            'sku', 'item_name', 'bike_type', 'customer_type', 
+            'quantity', 'final_price', 'subtotal_price', 'old_price', 
+            'warranty_status', 'pergantian_ke_total', 'pergantian_ke_yearly', 
+            'odometer', 'service_location_name'
+        ]
+        
+        # Ensure all cols exist
+        for col in display_cols:
+            if col not in paginated_df.columns:
+                paginated_df[col] = None
                 
-            # Date Range Filters
-            if filters.get('start_date'):
-                where_clauses.append("created_at >= :start_date")
-                params['start_date'] = filters['start_date']
-            
-            if filters.get('end_date'):
-                where_clauses.append("created_at <= :end_date")
-                params['end_date'] = filters['end_date']
-            
-            # Location Category Filter (3-Tier: B2B / Internal / Official Partner)
-            # Internal = Pondok Indah, Kembangan, Depok, Bekasi
-            if filters.get('location_category'):
-                cat = filters['location_category']
-                if cat == 'B2B Repair':
-                    where_clauses.append("service_location_name ILIKE '%GRAB%'")
-                elif cat == 'Internal Repair':
-                    where_clauses.append("""(
-                        service_location_name ILIKE '%Pondok Indah%' OR
-                        service_location_name ILIKE '%Kembangan%' OR
-                        service_location_name ILIKE '%Depok%' OR
-                        service_location_name ILIKE '%Bekasi%'
-                    )""")
-                elif cat == 'Official Partner':
-                    where_clauses.append("""(
-                        service_location_name NOT ILIKE '%GRAB%'
-                        AND service_location_name NOT ILIKE '%Pondok Indah%'
-                        AND service_location_name NOT ILIKE '%Kembangan%'
-                        AND service_location_name NOT ILIKE '%Depok%'
-                        AND service_location_name NOT ILIKE '%Bekasi%'
-                    )""")
-            
-            # Exclude specific SKUs (for Prime Input filter)
-            if filters.get('exclude_skus'):
-                excluded = filters['exclude_skus']
-                placeholders = ", ".join([f":exclude_sku_{i}" for i in range(len(excluded))])
-                where_clauses.append(f"sku NOT IN ({placeholders})")
-                for i, sku_val in enumerate(excluded):
-                    params[f'exclude_sku_{i}'] = sku_val
-        
-        where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
-        
-        # Count query
-        count_query = f"SELECT COUNT(*) FROM unified_part_logs WHERE {where_sql}"
-        total_count = self.loader.fetch_df(count_query, params).iloc[0, 0]
-        
-        # Data query with pagination
-        offset = (page - 1) * page_size
-        
-        # Use COALESCE/NULL handling if columns might be missing initially, but let's assume they exist per plan
-        data_query = f"""
-        SELECT 
-            created_at, source_system, order_number, vehicle_plate, 
-            sku, item_name, bike_type, customer_type, 
-            quantity, final_price, 
-            subtotal_price, old_price, 
-            warranty_coverage as warranty_status, -- Display coverage as warranty status
-            pergantian_ke_total, pergantian_ke_yearly, odometer,
-            service_location_name
-        FROM unified_part_logs 
-        WHERE {where_sql}
-        ORDER BY created_at DESC
-        LIMIT {page_size} OFFSET {offset}
-        """
-        
-        df = self.loader.fetch_df(data_query, params)
-        
-        return df, total_count
+        return paginated_df[display_cols], total_count
 
     def get_filter_options(self) -> dict:
-        """Get unique options for filters from database."""
-        options = {}
+        """Get unique options for filters from DataFrame."""
+        options = {k: [] for k in ['vehicle_plate', 'item_name', 'customer_type', 'warranty_coverage', 'sku', 'service_location_name']}
+        
+        df = self._get_drive_dataframe()
+        if df.empty:
+            return options
+            
         try:
-            # 1. Vehicle Plates (Top 1000 active/recent)
-            plate_query = "SELECT DISTINCT vehicle_plate FROM unified_part_logs WHERE vehicle_plate IS NOT NULL ORDER BY vehicle_plate"
-            options['vehicle_plate'] = self.loader.fetch_df(plate_query)['vehicle_plate'].tolist()
+            options['vehicle_plate'] = sorted([str(x) for x in df['vehicle_plate'].dropna().unique()])
+            options['item_name'] = sorted([str(x) for x in df['item_name'].dropna().unique()])
+            options['customer_type'] = sorted([str(x) for x in df['customer_type'].dropna().unique()])
             
-            # 2. Item Names
-            item_query = "SELECT DISTINCT item_name FROM unified_part_logs WHERE item_name IS NOT NULL ORDER BY item_name"
-            options['item_name'] = self.loader.fetch_df(item_query)['item_name'].tolist()
-            
-            # 3. Customer Type
-            cust_query = "SELECT DISTINCT customer_type FROM unified_part_logs WHERE customer_type IS NOT NULL ORDER BY customer_type"
-            options['customer_type'] = self.loader.fetch_df(cust_query)['customer_type'].tolist()
-            
-            # 4. Warranty Coverage
-            warranty_query = "SELECT DISTINCT warranty_coverage FROM unified_part_logs WHERE warranty_coverage IS NOT NULL ORDER BY warranty_coverage"
-            options['warranty_coverage'] = self.loader.fetch_df(warranty_query)['warranty_coverage'].tolist()
-            
-            # 5. SKU
-            sku_query = "SELECT DISTINCT sku FROM unified_part_logs WHERE sku IS NOT NULL ORDER BY sku"
-            options['sku'] = self.loader.fetch_df(sku_query)['sku'].tolist()
-            
-            # 6. Service Location
-            loc_query = "SELECT DISTINCT service_location_name FROM unified_part_logs WHERE service_location_name IS NOT NULL ORDER BY service_location_name"
-            options['service_location_name'] = self.loader.fetch_df(loc_query)['service_location_name'].tolist()
+            # Handle possible col rename or fallback
+            if 'warranty_coverage' in df.columns:
+                options['warranty_coverage'] = sorted([str(x) for x in df['warranty_coverage'].dropna().unique()])
+            elif 'warranty_status' in df.columns:
+                 options['warranty_coverage'] = sorted([str(x) for x in df['warranty_status'].dropna().unique()])
+                 
+            options['sku'] = sorted([str(x) for x in df['sku'].dropna().unique()])
+            options['service_location_name'] = sorted([str(x) for x in df['service_location_name'].dropna().unique()])
             
         except Exception as e:
-            print(f"⚠️ Error loading filter options: {e}")
-            # Return empty lists on error
-            options = {k: [] for k in ['vehicle_plate', 'item_name', 'customer_type', 'warranty_coverage', 'sku', 'service_location_name']}
+            print(f"⚠️ Error loading filter options from Local DataFrame: {e}")
             
         return options
     
@@ -732,109 +742,75 @@ class NeonSyncService:
         Shows pergantian_ke timeline per vehicle+sku.
         Apply all filters including dates.
         """
-        where_clauses = ["vehicle_plate IS NOT NULL"]
-        params = {}
-        
-        if filters:
-            if filters.get('vehicle_plate') and filters['vehicle_plate'] != 'All':
-                where_clauses.append("vehicle_plate = :plate")
-                params['plate'] = filters['vehicle_plate']
+        df = self._get_drive_dataframe()
+        if df.empty:
+            return pd.DataFrame()
             
-            # Additional filters for charts
-            if filters.get('start_date'):
-                where_clauses.append("created_at >= :start_date")
-                params['start_date'] = filters['start_date']
-            
-            if filters.get('end_date'):
-                where_clauses.append("created_at <= :end_date")
-                params['end_date'] = filters['end_date']
-
-        where_sql = " AND ".join(where_clauses)
-
-        query = f"""
-        SELECT 
-            vehicle_plate,
-            sku,
-            item_name,
-            DATE_TRUNC('month', created_at) as month,
-            pergantian_ke_total,
-            pergantian_ke_yearly,
-            final_price,
-            odometer,
-            warranty_coverage,
-            created_at
-        FROM unified_part_logs
-        WHERE {where_sql}
-        ORDER BY vehicle_plate, sku, created_at
-        """
+        # Base filter
+        filtered_df = df[df['vehicle_plate'].notna()].copy()
         
-        return self.loader.fetch_df(query, params)
+        # Apply UI filters
+        filtered_df = self._apply_filters_to_df(filtered_df, filters)
+        
+        if filtered_df.empty:
+            return filtered_df
+            
+        # Create Month truncate
+        filtered_df['month'] = pd.to_datetime(filtered_df['created_at']).dt.to_period('M').dt.to_timestamp()
+        
+        # Select target columns
+        target_cols = [
+            'vehicle_plate', 'sku', 'item_name', 'month', 
+            'pergantian_ke_total', 'pergantian_ke_yearly', 
+            'final_price', 'odometer', 'warranty_coverage', 'created_at'
+        ]
+        
+        # Ensure columns exist safely
+        for col in target_cols:
+             if col not in filtered_df.columns:
+                 if col == 'warranty_coverage' and 'warranty_status' in filtered_df.columns:
+                     filtered_df['warranty_coverage'] = filtered_df['warranty_status']
+                 else:
+                     filtered_df[col] = None
+                     
+        result_df = filtered_df[target_cols].copy()
+        result_df = result_df.sort_values(by=['vehicle_plate', 'sku', 'created_at'])
+        
+        return result_df
     
     def get_tire_cohort_data(self, filters: dict = None) -> pd.DataFrame:
         """
         Get Tire Cost Analysis data with GEL vs Non-GEL comparison.
-        Uses delivery_date directly from unified_part_logs (already in Neon).
-        
-        Logic:
-        1. Query unified_part_logs for items containing 'Tire' or 'Ban'.
-        2. Calculate duration_months = (created_at - delivery_date) / 30.44
-        3. Calculate odometer_diff = odometer - 0 (no delivery odometer available)
+        Uses delivery_date directly from unified_part_logs (already in Neon/CSV).
         """
-        where_clauses = ["(item_name ILIKE '%Tire%' OR item_name ILIKE '%Ban%')"]
-        params = {}
-        
-        if filters:
-            if filters.get('vehicle_plate') and filters['vehicle_plate'] != 'All':
-                where_clauses.append("vehicle_plate = :plate")
-                params['plate'] = filters['vehicle_plate']
-            
-            # Start/End date filters for replacement date
-            if filters.get('start_date'):
-                where_clauses.append("created_at >= :start_date")
-                params['start_date'] = filters['start_date']
-            
-            if filters.get('end_date'):
-                where_clauses.append("created_at <= :end_date")
-                params['end_date'] = filters['end_date']
-
-        where_sql = " AND ".join(where_clauses)
-
-        query = f"""
-        SELECT 
-            vehicle_plate,
-            sku,
-            item_name,
-            -- Use FIRST_VALUE to get consistent non-null customer_type per plate
-            COALESCE(
-                customer_type,
-                FIRST_VALUE(customer_type) OVER (
-                    PARTITION BY vehicle_plate 
-                    ORDER BY CASE WHEN customer_type IS NOT NULL AND customer_type != '' THEN 0 ELSE 1 END, created_at DESC
-                )
-            ) as customer_type,
-            pergantian_ke_total,
-            final_price,
-            odometer,
-            created_at,
-            -- Use FIRST_VALUE to get consistent non-null delivery_date per plate
-            COALESCE(
-                delivery_date,
-                FIRST_VALUE(delivery_date) OVER (
-                    PARTITION BY vehicle_plate 
-                    ORDER BY CASE WHEN delivery_date IS NOT NULL THEN 0 ELSE 1 END, created_at DESC
-                )
-            ) as delivery_date,
-            DATE(created_at) as replacement_date
-        FROM unified_part_logs
-        WHERE {where_sql}
-        ORDER BY vehicle_plate, created_at
-        """
-        
-        # Fetch data from Neon
-        df = self.loader.fetch_df(query, params)
+        df = self._get_drive_dataframe()
         if df.empty:
             return pd.DataFrame()
-
+            
+        # 1. Base filter: Tires
+        tire_mask = df['item_name'].astype(str).str.contains('Tire|Ban', case=False, na=False)
+        filtered_df = df[tire_mask].copy()
+        
+        # 2. Apply UI Filters
+        filtered_df = self._apply_filters_to_df(filtered_df, filters)
+        
+        if filtered_df.empty:
+            return filtered_df
+            
+        # 3. Simulate FIRST_VALUE window function for customer_type and delivery_date per plate
+        filtered_df = filtered_df.sort_values(['vehicle_plate', 'created_at'], ascending=[True, False])
+        
+        # Forward/Backward fill within groups to simulate FIRST_VALUE IGNORE NULLS logic simply
+        filtered_df['customer_type'] = filtered_df.groupby('vehicle_plate')['customer_type'].transform(lambda x: x.replace(['', 'nan', 'None'], pd.NA).ffill().bfill())
+        filtered_df['delivery_date'] = filtered_df.groupby('vehicle_plate')['delivery_date'].transform(lambda x: pd.to_datetime(x, errors='coerce').ffill().bfill())
+        
+        filtered_df['replacement_date'] = pd.to_datetime(filtered_df['created_at']).dt.date
+        
+        # Get target columns
+        df = filtered_df[['vehicle_plate', 'sku', 'item_name', 'customer_type', 
+                          'pergantian_ke_total', 'final_price', 'odometer', 
+                          'created_at', 'delivery_date', 'replacement_date']].copy()
+                          
         # Calculate metrics - normalize timezone (remove tz info)
         df['created_at'] = pd.to_datetime(df['created_at']).dt.tz_localize(None)
         df['delivery_date'] = pd.to_datetime(df['delivery_date'], errors='coerce').dt.tz_localize(None)
@@ -888,41 +864,51 @@ class NeonSyncService:
         Get cost/km data for chart visualization.
         Apply filters including dates.
         """
-        where_clauses = ["odometer > 0"]
-        params = {}
+        df = self._get_drive_dataframe()
+        if df.empty:
+            return pd.DataFrame()
+            
+        # 1. Base filter
+        df['odometer'] = pd.to_numeric(df['odometer'], errors='coerce').fillna(0)
+        filtered_df = df[df['odometer'] > 0].copy()
         
+        # 2. Apply UI Filters
         if filters:
             if filters.get('start_date'):
-                where_clauses.append("created_at >= :start_date")
-                params['start_date'] = filters['start_date']
+                filtered_df = filtered_df[filtered_df['created_at'] >= pd.to_datetime(filters['start_date'])]
             
             if filters.get('end_date'):
-                where_clauses.append("created_at <= :end_date")
-                params['end_date'] = filters['end_date']
-            
-            # Also apply other filters if relevant for context
+                filtered_df = filtered_df[filtered_df['created_at'] <= pd.to_datetime(filters['end_date'])]
+
             if filters.get('vehicle_plate') and filters['vehicle_plate'] != 'All':
-                where_clauses.append("vehicle_plate = :plate")
-                params['plate'] = filters['vehicle_plate']
+                filtered_df = filtered_df[filtered_df['vehicle_plate'] == filters['vehicle_plate']]
+                
+        if filtered_df.empty:
+            return pd.DataFrame()
+            
+        # 3. Group and aggregate
+        filtered_df['final_price'] = pd.to_numeric(filtered_df['final_price'], errors='coerce').fillna(0)
         
-        where_sql = " AND ".join(where_clauses)
+        grouped = filtered_df.groupby(['vehicle_plate', 'bike_type']).agg(
+            total_cost=('final_price', 'sum'),
+            max_odo=('odometer', 'max'),
+            min_odo=('odometer', 'min'),
+            service_count=('odometer', 'count')
+        ).reset_index()
         
-        query = f"""
-        SELECT 
-            vehicle_plate,
-            bike_type,
-            SUM(final_price) as total_cost,
-            MAX(odometer) - MIN(odometer) as km_traveled,
-            COUNT(*) as service_count
-        FROM unified_part_logs
-        WHERE {where_sql}
-        GROUP BY vehicle_plate, bike_type
-        HAVING MAX(odometer) - MIN(odometer) > 0
-        ORDER BY SUM(final_price) / NULLIF(MAX(odometer) - MIN(odometer), 0) DESC
-        LIMIT 100
-        """
+        # Calculate km_traveled
+        grouped['km_traveled'] = grouped['max_odo'] - grouped['min_odo']
         
-        df = self.loader.fetch_df(query, params)
-        if not df.empty:
-            df['cost_per_km'] = df['total_cost'] / df['km_traveled']
-        return df
+        # Filter where km_traveled > 0
+        grouped = grouped[grouped['km_traveled'] > 0].copy()
+        
+        if grouped.empty:
+            return pd.DataFrame()
+            
+        # Calculate cost_per_km
+        grouped['cost_per_km'] = grouped['total_cost'] / grouped['km_traveled']
+        
+        # Sort and limit 
+        grouped = grouped.sort_values('cost_per_km', ascending=False).head(100)
+        
+        return grouped

@@ -10,7 +10,26 @@ class DataLoader:
     def __init__(self, service_account_file=SERVICE_ACCOUNT_FILE):
         self.service_account_file = service_account_file
         self.client = None
+        self.drive_service = None
         self._connect()
+
+    def _get_drive_service(self, creds_dict=None):
+        """Initializes Google Drive API service."""
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+        
+        SCOPES = ['https://www.googleapis.com/auth/drive.file']
+        
+        try:
+            if creds_dict:
+                creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+            else:
+                creds = service_account.Credentials.from_service_account_file(str(self.service_account_file), scopes=SCOPES)
+            
+            self.drive_service = build('drive', 'v3', credentials=creds)
+            print("✅ Connected to Google Drive API.")
+        except Exception as e:
+            print(f"⚠️ Failed to connect to Google Drive API: {e}")
 
     def _connect(self):
         """Authenticates with Google Sheets API."""
@@ -23,12 +42,16 @@ class DataLoader:
                     # st.secrets returns a purely string-based dict which is what we need
                     creds_dict = dict(st.secrets["gcp_service_account"])
                     
+                    
                     # Fix private_key if it contains escaped newlines (common issue in TOML/Streamlit secrets)
                     if "private_key" in creds_dict:
                          creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
 
                     self.client = gspread.service_account_from_dict(creds_dict)
                     print("✅ Connected to Google Sheets via Streamlit Secrets.")
+                    
+                    # Also init drive service
+                    self._get_drive_service(creds_dict)
                     return
             except ImportError:
                 pass # Streamlit not installed or not running in streamlit context
@@ -41,6 +64,9 @@ class DataLoader:
             
             self.client = gspread.service_account(filename=str(self.service_account_file))
             print("✅ Connected to Google Sheets via File.")
+            
+            # Init drive service
+            self._get_drive_service()
         except Exception as e:
             print(f"❌ Connection Failed: {e}")
             raise e
@@ -75,6 +101,109 @@ class DataLoader:
         except Exception as e:
             print(f"❌ Error loading CSV {filepath}: {e}")
             return pd.DataFrame()
+
+    def upload_csv_to_drive(self, df, folder_id, filename):
+        """
+        Converts DataFrame to CSV and uploads it directly to Google Drive.
+        If a file with the same name exists in the folder, it updates it.
+        Otherwise, it creates a new file.
+        Returns the file ID.
+        """
+        import io
+        from googleapiclient.http import MediaIoBaseUpload
+        
+        if not self.drive_service:
+            print("❌ Drive service not initialized. Cannot upload to Drive.")
+            raise ConnectionError("Google Drive API is not connected.")
+            
+        try:
+            print(f"📤 Exporting {len(df)} rows to CSV format...")
+            
+            # Write to string buffer
+            csv_buffer = io.StringIO()
+            df.to_csv(csv_buffer, index=False)
+            csv_buffer.seek(0)
+            
+            # Check if file exists in folder (include supportsAllDrives=True for Shared Drives)
+            query = f"name='{filename}' and '{folder_id}' in parents and trashed=false"
+            results = self.drive_service.files().list(
+                q=query, spaces='drive', fields='files(id, name)',
+                includeItemsFromAllDrives=True, supportsAllDrives=True
+            ).execute()
+            items = results.get('files', [])
+            
+            media = MediaIoBaseUpload(io.BytesIO(csv_buffer.getvalue().encode('utf-8')), mimetype='text/csv', resumable=True)
+            
+            if items:
+                # Update existing file
+                file_id = items[0]['id']
+                print(f"   🔄 Updating existing file '{filename}' (ID: {file_id}) in Drive...")
+                response = self.drive_service.files().update(
+                    fileId=file_id,
+                    media_body=media,
+                    supportsAllDrives=True
+                ).execute()
+            else:
+                # Create new file
+                print(f"   ➕ Creating new file '{filename}' in Drive folder...")
+                file_metadata = {
+                    'name': filename,
+                    'parents': [folder_id],
+                    'mimeType': 'text/csv'
+                }
+                response = self.drive_service.files().create(
+                    body=file_metadata,
+                    media_body=media,
+                    fields='id',
+                    supportsAllDrives=True
+                ).execute()
+                file_id = response.get('id')
+                
+            print(f"✅ Successfully uploaded '{filename}' to Google Drive (ID: {file_id}).")
+            return file_id
+            
+        except Exception as e:
+            print(f"❌ Error uploading to Google Drive: {e}")
+            raise e
+
+    def load_csv_from_drive(self, folder_id, filename):
+        """
+        Download a CSV file from Google Drive and return as Pandas DataFrame.
+        """
+        self._connect()
+        try:
+            from googleapiclient.http import MediaIoBaseDownload
+            import io
+            
+            # Find the file ID
+            query = f"name='{filename}' and '{folder_id}' in parents and trashed=false"
+            results = self.drive_service.files().list(
+                q=query, spaces='drive', fields='files(id, name)',
+                includeItemsFromAllDrives=True, supportsAllDrives=True
+            ).execute()
+            items = results.get('files', [])
+            
+            if not items:
+                raise FileNotFoundError(f"File '{filename}' not found in Google Drive folder '{folder_id}'.")
+                
+            file_id = items[0]['id']
+            
+            # Download file
+            request = self.drive_service.files().get_media(fileId=file_id)
+            file_buffer = io.BytesIO()
+            downloader = MediaIoBaseDownload(file_buffer, request)
+            
+            done = False
+            while done is False:
+                status, done = downloader.next_chunk()
+                
+            file_buffer.seek(0)
+            df = pd.read_csv(file_buffer)
+            return df
+            
+        except Exception as e:
+            print(f"❌ Error downloading CSV from Google Drive: {e}")
+            raise e
             
     def upload_to_sheet(self, df, sheet_id, worksheet_name):
         """

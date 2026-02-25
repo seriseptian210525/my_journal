@@ -11,7 +11,7 @@ import math
 st.set_page_config(page_title="Service Items Tracker", page_icon="🛠️", layout="wide")
 
 st.title("🛠️ Historical Service Items Tracker")
-st.caption("Single Source of Truth - Data dari Neon Database")
+st.caption("Single Source of Truth - Cloud Data via Google Drive")
 
 # =============================================================================
 # IMPORTS & SERVICES
@@ -19,11 +19,13 @@ st.caption("Single Source of Truth - Data dari Neon Database")
 try:
     from src.services.part_usage_service import PartUsageService
     from src.services.neon_sync_service import NeonSyncService
+    # Keep the backend object as neon_service structurally, 
+    # but logically it pulls from Drive Cloud Data now
     neon_service = NeonSyncService()
-    NEON_AVAILABLE = True
+    CLOUD_DATA_AVAILABLE = True
 except Exception as e:
-    NEON_AVAILABLE = False
-    st.warning(f"⚠️ Neon connection not available: {e}")
+    CLOUD_DATA_AVAILABLE = False
+    st.warning(f"⚠️ Cloud Data connection not available: {e}")
 
 # =============================================================================
 # HELPER: Reset page on filter change
@@ -61,40 +63,33 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
                 st.error(f"Error reading file: {e}")
     
     with col2:
-        st.markdown("### Sync to Neon Database")
-        st.info("Sync ke Neon dengan full data quality pipeline. Otomatis handle data baru & data susulan tanpa duplikat.")
+        st.markdown("### Append New File to Cloud Data")
+        st.info("Jalankan pipeline ETL penuh untuk menarik ulang semua data Google Sheets, membersihkan data, dan me-refresh file Cloud CSV di Google Drive.")
         
-        if NEON_AVAILABLE:
-            if st.button("🔄 Sync to Neon", type="secondary", use_container_width=True):
-                with st.spinner("Syncing to Neon (9-step pipeline + dedup check)..."):
+        if CLOUD_DATA_AVAILABLE:
+            if st.button("🔄 Refresh Cloud Data", type="secondary", use_container_width=True):
+                with st.spinner("Executing Full ETL Pipeline (Fetching from 3 sheets, normalizing, dropping Neon DB, uploading tracking CSV to Drive)..."):
                     try:
-                        result = neon_service.run_incremental_sync()
-                        if result['status'] == 'success':
-                            # Build detailed status message
-                            status_msg = f"""
-                            ✅ **Sync completed!**
+                        import sys
+                        from io import StringIO
+                        # We use run_pipeline from the extraction root, modifying std buffer to capture print logs
+                        import contextlib
+                        from src.pipelines.neon_sync.run import run_pipeline
+                        
+                        output_buffer = StringIO()
+                        with contextlib.redirect_stdout(output_buffer):
+                            run_pipeline()
+                        
+                        log_output = output_buffer.getvalue()
+                        st.success("✅ **Cloud Data Refresh Completed Successfully!**")
+                        # We dump the terminal log into an expander so they know what happened 
+                        with st.expander("Show Execution Logs", expanded=False):
+                            st.code(log_output, language='bash')
                             
-                            **Sources Checked:**
-                            - Service Items: {result.get('service_items_new', 0)} candidates
-                            - Part Usage: {result.get('part_usage_new', 0)} candidates
-                            
-                            **Data Quality:**
-                            - Test plates excluded: {result.get('test_plates_excluded', 0)}
-                            - Customer type fixed: {result.get('customer_type_fixed', 0)}
-                            - Duplicates skipped: {result.get('duplicates_skipped', 0)}
-                            
-                            **Inserted:** {result.get('total_inserted', 0)} new rows
-                            """
-                            st.success(status_msg)
-                        elif result['status'] == 'no_new_data':
-                            msg = result.get('message', 'No new data to sync.')
-                            st.info(f"ℹ️ {msg}")
-                        else:
-                            st.error(f"❌ Sync failed: {result.get('error', 'Unknown error')}")
                     except Exception as e:
-                        st.error(f"❌ Error: {str(e)}")
+                        st.error(f"❌ Backup failed: {str(e)}")
         else:
-            st.warning("Neon connection not available. Check NEON_DB_CONNECTION_STRING in .env")
+            st.warning("Cloud Data connection not available. Check environment credentials.")
 
 # =============================================================================
 # FILTERS (Dynamic with Apply Button)
@@ -140,7 +135,7 @@ filter_options = {
     'sku': []
 }
 
-if NEON_AVAILABLE:
+if CLOUD_DATA_AVAILABLE:
     try:
         filter_options = neon_service.get_filter_options()
     except Exception as e:
@@ -342,7 +337,7 @@ if filters:
 st.markdown("---")
 
 with st.expander("📋 Service History", expanded=True):
-    if NEON_AVAILABLE:
+    if CLOUD_DATA_AVAILABLE:
         # Pagination controls
         page_size = st.selectbox("Rows per page", [25, 50, 100], index=1, key="page_size_select")
         
@@ -435,7 +430,7 @@ with st.expander("📋 Service History", expanded=True):
         except Exception as e:
             st.error(f"Error loading data: {e}")
     else:
-        st.warning("Connect to Neon to view data")
+        st.warning("Connect to Cloud Data to view data")
 
 # =============================================================================
 # PRIME INPUT TABLE (GEL + Internal Repair + NOT_COVERED)
@@ -445,7 +440,7 @@ st.markdown("---")
 with st.expander("🎯 Prime Input Queue", expanded=False):
     st.caption("Data yang perlu diinput manual: **Internal Repair** + **GEL** + **NOT_COVERED**")
     
-    if NEON_AVAILABLE:
+    if CLOUD_DATA_AVAILABLE:
         try:
             from src.services.prime_tracking_service import PrimeTrackingService
             from src.common.config import NEON_DB_CONNECTION_STRING
@@ -685,7 +680,7 @@ with chart_tab2:
     st.markdown("### Cost per Kilometer Analysis")
     st.caption("Top vehicles by Cost Efficiency (Cost / KM). Requires Odometer data.")
     
-    if NEON_AVAILABLE:
+    if CLOUD_DATA_AVAILABLE:
         try:
             # Pass ALL filters including dates
             cost_df = neon_service.get_cost_per_km_data(filters=filters if filters else None)
@@ -729,15 +724,15 @@ with chart_tab2:
         except Exception as e:
             st.error(f"Error loading cost data: {e}")
     else:
-        st.warning("Connect to Neon to view analytics")
+        st.warning("Connect to Cloud Data to view analytics")
 
 # =============================================================================
 # FOOTER
 # =============================================================================
 st.markdown("---")
 # Safe check for total_count
-record_count = total_count if 'total_count' in dir() and NEON_AVAILABLE else 'N/A'
-st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Data Source: Neon PostgreSQL | Total Records: {record_count:,}" if isinstance(record_count, int) else f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Data Source: Neon PostgreSQL | Total Records: {record_count}")
+record_count = total_count if 'total_count' in dir() and CLOUD_DATA_AVAILABLE else 'N/A'
+st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Data Source: Google Drive Cloud CSV | Total Records: {record_count:,}" if isinstance(record_count, int) else f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Data Source: Google Drive Cloud CSV | Total Records: {record_count}")
 
 
 

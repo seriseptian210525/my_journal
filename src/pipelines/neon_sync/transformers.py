@@ -41,6 +41,11 @@ def normalize_odometer(df, max_odometer=200000, daily_km_estimate=100, max_delta
     df['odometer'] = df['odometer'].astype(str).str.replace(r'[^\d]', '', regex=True).replace('', '0')
     df['odometer'] = pd.to_numeric(df['odometer'], errors='coerce').fillna(0).astype('int64')
     
+    # --- PHASE 9: Harmonic Odometer Intra-Order ---
+    # Broadcast the max odometer reading within the same Work Order to all its exploded items
+    if 'order_number' in df.columns:
+        df['odometer'] = df.groupby('order_number')['odometer'].transform('max')
+        
     # Step 2: Sort by plate and time for proper sequence
     df = df.sort_values(['vehicle_plate', 'created_at']).reset_index(drop=True)
     
@@ -71,17 +76,18 @@ def normalize_odometer(df, max_odometer=200000, daily_km_estimate=100, max_delta
         print(f"   ✅ Estimated {zeros_filled:,} zero odometer values")
     
     # Step 5: Enforce monotonic increase per plate
-    # If current < previous, cap to previous value
-    df['prev_odometer'] = df.groupby('vehicle_plate')['odometer'].shift(1)
-    monotonic_violations = ((df['odometer'] < df['prev_odometer']) & (df['prev_odometer'].notna())).sum()
+    # We must use cummax() so that if a previous row was bumped up, subsequent rows are compared to the bumped value.
+    monotonic_violations = (df['odometer'] < df.groupby('vehicle_plate')['odometer'].cummax()).sum()
     
     if monotonic_violations > 0:
-        mask_decrease = (df['odometer'] < df['prev_odometer']) & (df['prev_odometer'].notna())
-        df.loc[mask_decrease, 'odometer'] = df.loc[mask_decrease, 'prev_odometer'].astype('int64')
-        print(f"   🔄 Fixed {monotonic_violations:,} monotonic violations (odometer decreased)")
+        df['odometer'] = df.groupby('vehicle_plate')['odometer'].cummax()
+        print(f"   🔄 Fixed {monotonic_violations:,} monotonic violations (odometer decreased/dipped)")
     
-    # Cleanup temp column
-    df = df.drop(columns=['prev_odometer'], errors='ignore')
+    # --- PHASE 9b: Harmonic Odometer Intra-Order POST-ESTIMATION ---
+    # After zero-filling and monotonic enforcement, we must guarantee that exploded rows belonging to the exact same order_number
+    # share the EXACT same odometer value (some might have been skewed if they were separated by an arbitrary sort order before).
+    if 'order_number' in df.columns:
+        df['odometer'] = df.groupby('order_number')['odometer'].transform('max')
     
     print(f"   ✅ Odometer normalized. Final range: {df['odometer'].min():,} - {df['odometer'].max():,}")
     
@@ -170,16 +176,34 @@ def calculate_warranty_coverage(df, asset_df=None, mapping_df=None, skip_sequenc
         
         if plate_col and delivery_col:
             asset_clean['join_plate'] = asset_clean[plate_col].astype(str).str.strip().str.upper().str.replace(' ', '')
-            asset_clean['_delivery_date'] = pd.to_datetime(asset_clean[delivery_col], errors='coerce')
+            asset_clean['_delivery_date'] = pd.to_datetime(asset_clean[delivery_col], errors='coerce', dayfirst=True)
             asset_clean = asset_clean.drop_duplicates(subset=['join_plate'])
             
-            out = pd.merge(out, asset_clean[['join_plate', '_delivery_date']], on='join_plate', how='left')
-            out['delivery_date'] = out['_delivery_date']
-            out = out.drop(columns=['_delivery_date', 'join_plate'], errors='ignore')
+            # If the dataframe already has a 'delivery_date' column, we only want to fill NaNs
+            # But the signature suggests we are pulling it fresh if asset_df is provided.
+            # Let's check if 'delivery_date' exists in the incoming df
+            if 'delivery_date' in out.columns:
+                # Ensure existing is datetime
+                out['delivery_date'] = pd.to_datetime(out['delivery_date'], errors='coerce', dayfirst=True)
+                
+                # Merge and fill
+                out = pd.merge(out, asset_clean[['join_plate', '_delivery_date']], on='join_plate', how='left')
+                out['delivery_date'] = out['delivery_date'].fillna(out['_delivery_date'])
+                out = out.drop(columns=['_delivery_date', 'join_plate'], errors='ignore')
+            else:
+                out = pd.merge(out, asset_clean[['join_plate', '_delivery_date']], on='join_plate', how='left')
+                out['delivery_date'] = out['_delivery_date']
+                out = out.drop(columns=['_delivery_date', 'join_plate'], errors='ignore')
         else:
-            out['delivery_date'] = pd.NaT
+            if 'delivery_date' not in out.columns:
+                out['delivery_date'] = pd.NaT
+            else:
+                out['delivery_date'] = pd.to_datetime(out['delivery_date'], errors='coerce', dayfirst=True)
     else:
-        out['delivery_date'] = pd.NaT
+        if 'delivery_date' not in out.columns:
+            out['delivery_date'] = pd.NaT
+        else:
+            out['delivery_date'] = pd.to_datetime(out['delivery_date'], errors='coerce', dayfirst=True)
     
     # --- Step 2: Customer Category Mapping ---
     # GEL → PARTNER_USER, else → ELECTRUM_USER
@@ -189,13 +213,30 @@ def calculate_warranty_coverage(df, asset_df=None, mapping_df=None, skip_sequenc
         'ELECTRUM_USER'
     )
     
+    # Ensure delivery_date is timezone-naive for safe calculations
+    out['delivery_date'] = pd.to_datetime(out['delivery_date'], errors='coerce', dayfirst=True)
+    if out['delivery_date'].dt.tz is not None:
+        out['delivery_date'] = out['delivery_date'].dt.tz_localize(None)
+
+    out['created_at'] = pd.to_datetime(out['created_at'], errors='coerce')
+    if out['created_at'].dt.tz is not None:
+        out['created_at'] = out['created_at'].dt.tz_localize(None)
+    
     # --- Step 3: Calculate Bulan Ke ---
-    # (created_at - delivery_date) in days / 30.44
-    out['bulan_ke'] = ((out['created_at'] - out['delivery_date']).dt.days / 30.44).fillna(0).astype(int)
+    # Strictly handle Empty/NaT delivery_date
+    mask_valid_dates = out['delivery_date'].notna() & out['created_at'].notna()
+    
+    out['bulan_ke'] = 0
+    if mask_valid_dates.any():
+        out.loc[mask_valid_dates, 'bulan_ke'] = ((out.loc[mask_valid_dates, 'created_at'] - out.loc[mask_valid_dates, 'delivery_date']).dt.days / 30.44).astype(int)
+    
     out['bulan_ke'] = out['bulan_ke'].apply(lambda x: max(0, x))  # No negative months
     
     # --- Step 4: Calculate Year Cycle ---
     out['year_cycle'] = (out['bulan_ke'] // 12).astype(int)
+    
+    # Create mask for invalid delivery date logic
+    out['missing_delivery_date'] = ~mask_valid_dates
     
     # --- Step 5: Join Warranty Config from Mappings ---
     out['warranty_type'] = ''
@@ -258,52 +299,50 @@ def calculate_warranty_coverage(df, asset_df=None, mapping_df=None, skip_sequenc
     # --- Step 7: Calculate Warranty Coverage ---
     def check_warranty_coverage(row):
         """
-        Determine warranty coverage with priority.
+        Determine warranty coverage with priority and validation.
         """
         covered_for = str(row.get('covered_for', '') or '').upper()
-        cust_cat = str(row.get('customer_category', '') or '').upper()
-        limit = int(row.get('limit_per_year', 0) or 0)
-        pergantian = int(row.get('pergantian_ke_yearly', 1) or 1)
-        warranty_types = str(row.get('warranty_type', '') or '').upper()
-        bulan_ke = int(row.get('bulan_ke', 0) or 0)
-        periode_garansi = int(row.get('periode_garansi', 0) or 0)
-        
-        # Check if customer category is covered
-        is_customer_covered = cust_cat in covered_for if covered_for else False
-        
-        # Check if within limit (0 = unlimited)
-        within_limit = (limit == 0) or (pergantian <= limit)
         
         # Check if within warranty period
         within_warranty_period = (periode_garansi > 0) and (bulan_ke < periode_garansi)
-        
         # Parse multiple warranty types
         types_list = [t.strip() for t in warranty_types.split(',') if t.strip()]
         
-        # Priority-based check
-        # Priority-based check
-        if 'PACKAGE_SERVICE' in types_list:
-            if is_customer_covered and within_limit:
-                return 'PACKAGE_SERVICE'
+    def determine_warranty(row):
+        # 0. Strict delivery_date check!
+        if row.get('missing_delivery_date', False):
+            # If there's no delivery date, we cannot grant warranty safely.
+            return 'INVALID_WARRANTY (NO_DELIVERY_DATE)'
+            
+        covered_for = str(row['covered_for']).strip().upper()
         
-        # 2. WARRANTY: check for "WARRANT" (matches WARRANT and WARRANTY)
-        # customer covered + bulan_ke < periode_garansi
-        # If covered_for is empty, assume covered for ALL (if warranty type is present)
-        # Relaxed check: match substring 'WARRANT'
-        if any('WARRANT' in t for t in types_list):
-            customer_ok = is_customer_covered or (not covered_for)
-            if customer_ok and within_warranty_period:
-                return 'WARRANTY'
-        
-        # 3. INSURANCE: Always covered if customer type matches
-        if 'INSURANCE' in types_list:
-            customer_ok = is_customer_covered or (not covered_for)
-            if customer_ok:
-                return 'INSURANCE'
-        
-        return 'NOT_COVERED'
+        # 1. Is covered by mapping?
+        if covered_for not in ['BOTH', row.get('customer_category', '')]:
+            return 'NOT_COVERED'
+            
+        # 2. Package Service Check
+        if str(row['warranty_type']).strip().upper() == 'PACKAGE_SERVICE':
+            return 'PACKAGE_SERVICE'
+            
+        # 3. Time Limit Check (Periode Garansi in months)
+        if row['periode_garansi'] > 0 and row['bulan_ke'] > row['periode_garansi']:
+            return 'NOT_COVERED (EXPIRED)'
+            
+        # 4. Limit per Year Check
+        if row['limit_per_year'] > 0 and row.get('pergantian_ke_yearly', 1) > row['limit_per_year']:
+            return 'NOT_COVERED (LIMIT_EXCEEDED)'
+            
+        # 5. Passed all checks -> return warranty type
+        return str(row['warranty_type']).strip().upper()
+
+    out['warranty_coverage'] = out.apply(determine_warranty, axis=1)
     
-    out['warranty_coverage'] = out.apply(check_warranty_coverage, axis=1)
+    # Clean up temp cols
+    out = out.drop(columns=['missing_delivery_date'], errors='ignore')
+    
+    # Ensure standard categories where possible
+    # Rename default to something recognizable if we only want 3 standard flags downstream.
+    # We will keep detailed flags (e.g., NOT_COVERED (LIMIT_EXCEEDED)) as they are very useful for debugging.
     
     if not skip_sequence_calc:
         print(f"   ✅ Warranty coverage calculated. Distribution:")
