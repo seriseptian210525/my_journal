@@ -14,81 +14,90 @@ def standardize_service_type_vectorized(series):
     return series.astype(str).str.upper().str.strip().replace('NAN', '').replace('NONE', '')
 
 
-def normalize_odometer(df, max_odometer=200000, daily_km_estimate=100, max_delta_per_month=50000):
+def normalize_odometer(df, daily_km_estimate=100):
     """
-    Normalize odometer values for data quality.
-    Benchmarked from work_orders/transformers.py process_odometer.
+    Normalize odometer values using linear estimation.
     
     Logic:
-    1. Clean non-numeric characters
-    2. Forward-fill zero/missing values with estimate (last_value + days * daily_km)
-    3. Cap outliers at max_odometer
-    4. Enforce monotonic increase per plate (cap decreasing values to previous)
-    5. Cap large jumps (> max_delta_per_month within 30 days)
+    1. Clean non-numeric characters, keep original values > 0 as-is.
+    2. Intra-Order Sync: all items in the same WO share the highest odometer.
+    3. Zero-fill: estimate from previous service odometer + (days_gap * daily_km_estimate).
+       If no previous service, estimate from delivery_date to created_at.
+    4. Final Intra-Order Sync after estimation.
     
-    Args:
-        df: DataFrame with 'vehicle_plate', 'created_at', 'odometer' columns
-        max_odometer: Cap values above this (default 200,000 km)
-        daily_km_estimate: Estimated km/day for zero-fill (default 100)
-        max_delta_per_month: Max allowed delta in 30 days (default 50,000 km)
+    No max_odometer cap, no cummax, no time interpolation.
     """
     if df.empty or 'odometer' not in df.columns:
         return df
     
-    print("🔧 Normalizing Odometer...")
+    print("🔧 Normalizing Odometer (Linear Estimation V3)...")
     
-    # Step 1: Clean - extract numeric only
+    # 0. Clean string types
     df['odometer'] = df['odometer'].astype(str).str.replace(r'[^\d]', '', regex=True).replace('', '0')
     df['odometer'] = pd.to_numeric(df['odometer'], errors='coerce').fillna(0).astype('int64')
     
-    # --- PHASE 9: Harmonic Odometer Intra-Order ---
-    # Broadcast the max odometer reading within the same Work Order to all its exploded items
+    # 1. Intra-Order Sync: broadcast highest odometer within the same Work Order
     if 'order_number' in df.columns:
         df['odometer'] = df.groupby('order_number')['odometer'].transform('max')
-        
-    # Step 2: Sort by plate and time for proper sequence
+    
     df = df.sort_values(['vehicle_plate', 'created_at']).reset_index(drop=True)
     
-    # Step 3: Cap extreme outliers first (e.g., 51 million km -> max_odometer)
-    outliers_capped = (df['odometer'] > max_odometer).sum()
-    df.loc[df['odometer'] > max_odometer, 'odometer'] = max_odometer
-    if outliers_capped > 0:
-        print(f"   ⚠️ Capped {outliers_capped:,} outliers (> {max_odometer:,} km)")
+    # 2. Zero-fill estimation
+    df['created_at_dt'] = pd.to_datetime(df['created_at'], errors='coerce')
     
-    # Step 4: Forward-fill zeros with estimate (last_value + days * daily_km)
-    temp_odo = df['odometer'].replace(0, np.nan)
-    last_val = df.groupby('vehicle_plate')['odometer'].transform(
-        lambda x: x.replace(0, np.nan).ffill()
-    )
-    last_date = df.groupby('vehicle_plate')['created_at'].transform(
-        lambda x: x.where(df.loc[x.index, 'odometer'] > 0).ffill()
-    )
+    if 'delivery_date' in df.columns:
+        df['delivery_date_dt'] = pd.to_datetime(df['delivery_date'], errors='coerce')
+    else:
+        df['delivery_date_dt'] = pd.NaT
     
-    diff_days = (pd.to_datetime(df['created_at']) - pd.to_datetime(last_date)).dt.days.fillna(0)
+    zeros_filled = 0
     
-    # Only fill where odometer is 0 and we have a valid last value
-    mask_fill = (df['odometer'] == 0) & (last_val > 0)
-    estimated_values = (last_val + (diff_days * daily_km_estimate)).clip(upper=max_odometer)
+    # Process per plate group
+    for plate, group in df.groupby('vehicle_plate'):
+        last_valid_odo = 0
+        last_valid_date = None  # Will be delivery_date or last valid service date
+        
+        # Try to use delivery_date as the starting anchor
+        delivery_dt = group['delivery_date_dt'].iloc[0] if group['delivery_date_dt'].notna().any() else None
+        if delivery_dt is not None and pd.notna(delivery_dt):
+            last_valid_date = delivery_dt
+        
+        for idx in group.index:
+            odo_val = df.at[idx, 'odometer']
+            service_date = df.at[idx, 'created_at_dt']
+            
+            if odo_val > 0:
+                # Keep original value, update anchor
+                last_valid_odo = odo_val
+                if pd.notna(service_date):
+                    last_valid_date = service_date
+            else:
+                # Estimate from previous anchor
+                if last_valid_date is not None and pd.notna(service_date) and pd.notna(last_valid_date):
+                    days_gap = (service_date - last_valid_date).days
+                    days_gap = max(0, days_gap)
+                    estimated = last_valid_odo + (days_gap * daily_km_estimate)
+                    df.at[idx, 'odometer'] = int(estimated)
+                    zeros_filled += 1
+                    # Update anchor to this estimated value so next zero builds on it
+                    last_valid_odo = int(estimated)
+                    last_valid_date = service_date
+                elif last_valid_odo > 0:
+                    # No valid date, just carry forward
+                    df.at[idx, 'odometer'] = last_valid_odo
+                    zeros_filled += 1
     
-    zeros_filled = mask_fill.sum()
-    df.loc[mask_fill, 'odometer'] = estimated_values[mask_fill].astype('int64')
     if zeros_filled > 0:
         print(f"   ✅ Estimated {zeros_filled:,} zero odometer values")
     
-    # Step 5: Enforce monotonic increase per plate
-    # We must use cummax() so that if a previous row was bumped up, subsequent rows are compared to the bumped value.
-    monotonic_violations = (df['odometer'] < df.groupby('vehicle_plate')['odometer'].cummax()).sum()
-    
-    if monotonic_violations > 0:
-        df['odometer'] = df.groupby('vehicle_plate')['odometer'].cummax()
-        print(f"   🔄 Fixed {monotonic_violations:,} monotonic violations (odometer decreased/dipped)")
-    
-    # --- PHASE 9b: Harmonic Odometer Intra-Order POST-ESTIMATION ---
-    # After zero-filling and monotonic enforcement, we must guarantee that exploded rows belonging to the exact same order_number
-    # share the EXACT same odometer value (some might have been skewed if they were separated by an arbitrary sort order before).
+    # 3. Final Intra-Order Sync after estimation
     if 'order_number' in df.columns:
         df['odometer'] = df.groupby('order_number')['odometer'].transform('max')
     
+    # Cleanup temp cols
+    df = df.drop(columns=['created_at_dt', 'delivery_date_dt'], errors='ignore')
+    
+    df['odometer'] = df['odometer'].astype('int64')
     print(f"   ✅ Odometer normalized. Final range: {df['odometer'].min():,} - {df['odometer'].max():,}")
     
     return df
@@ -297,43 +306,88 @@ def calculate_warranty_coverage(df, asset_df=None, mapping_df=None, skip_sequenc
         out['pergantian_ke_yearly'] = out.groupby(['vehicle_plate', 'sku', 'year_cycle']).cumcount() + 1
     
     # --- Step 7: Calculate Warranty Coverage ---
-    def check_warranty_coverage(row):
-        """
-        Determine warranty coverage with priority and validation.
-        """
-        covered_for = str(row.get('covered_for', '') or '').upper()
-        
-        # Check if within warranty period
-        within_warranty_period = (periode_garansi > 0) and (bulan_ke < periode_garansi)
-        # Parse multiple warranty types
-        types_list = [t.strip() for t in warranty_types.split(',') if t.strip()]
-        
     def determine_warranty(row):
-        # 0. Strict delivery_date check!
-        if row.get('missing_delivery_date', False):
-            # If there's no delivery date, we cannot grant warranty safely.
-            return 'INVALID_WARRANTY (NO_DELIVERY_DATE)'
-            
-        covered_for = str(row['covered_for']).strip().upper()
+        """
+        Determine warranty coverage following Mappings 'Warranty Type' taxonomy.
         
-        # 1. Is covered by mapping?
-        if covered_for not in ['BOTH', row.get('customer_category', '')]:
+        Semantic covered_for matching:
+          - PARTNER_USER → customer_type != EKB (i.e., customer_category == PARTNER_USER)
+          - ELECTRUM_USER → customer_type == EKB (i.e., customer_category == ELECTRUM_USER)
+          - BOTH → all customers
+        
+        Decision tree:
+          1. No delivery_date → INVALID_WARRANTY
+          2. covered_for mismatch → NOT_COVERED
+          3. warranty_type == PACKAGE_SERVICE → check limit & period → PACKAGE_SERVICE or NOT_COVERED
+          4. warranty_type == WARRANT → check period → WARRANT or NOT_COVERED
+          5. warranty_type == INSURANCE, WARRANT → within period? WARRANT : INSURANCE
+          6. warranty_type == INSURANCE → INSURANCE
+          7. Else → NOT_COVERED
+        """
+        # 0. Strict delivery_date check
+        if row.get('missing_delivery_date', False):
+            return 'INVALID_WARRANTY (NO_DELIVERY_DATE)'
+        
+        # 1. Parse covered_for and check semantic match
+        covered_for_raw = str(row.get('covered_for', '')).strip().upper()
+        covered_list = [c.strip() for c in covered_for_raw.split(',') if c.strip()]
+        customer_category = str(row.get('customer_category', '')).strip().upper()
+        
+        # Semantic matching
+        # Empty covered_for = universal coverage (covers everyone)
+        is_covered = False
+        if not covered_list:
+            is_covered = True  # No restriction = covers all
+        elif 'BOTH' in covered_list:
+            is_covered = True
+        elif 'PARTNER_USER' in covered_list and customer_category == 'PARTNER_USER':
+            is_covered = True
+        elif 'ELECTRUM_USER' in covered_list and customer_category == 'ELECTRUM_USER':
+            is_covered = True
+        
+        if not is_covered:
             return 'NOT_COVERED'
-            
-        # 2. Package Service Check
-        if str(row['warranty_type']).strip().upper() == 'PACKAGE_SERVICE':
+        
+        # 2. Read warranty_type from Mappings
+        wt = str(row.get('warranty_type', '')).strip().upper()
+        bulan_ke = row.get('bulan_ke', 0)
+        periode_garansi = row.get('periode_garansi', 0)
+        limit_per_year = row.get('limit_per_year', 0)
+        pergantian_ke_yearly = row.get('pergantian_ke_yearly', 1)
+        within_period = (periode_garansi <= 0) or (bulan_ke <= periode_garansi)
+        
+        # 3. PACKAGE_SERVICE: check period + limit
+        if wt == 'PACKAGE_SERVICE':
+            if not within_period:
+                return 'NOT_COVERED'
+            if limit_per_year > 0 and pergantian_ke_yearly > limit_per_year:
+                return 'NOT_COVERED'
             return 'PACKAGE_SERVICE'
-            
-        # 3. Time Limit Check (Periode Garansi in months)
-        if row['periode_garansi'] > 0 and row['bulan_ke'] > row['periode_garansi']:
-            return 'NOT_COVERED (EXPIRED)'
-            
-        # 4. Limit per Year Check
-        if row['limit_per_year'] > 0 and row.get('pergantian_ke_yearly', 1) > row['limit_per_year']:
-            return 'NOT_COVERED (LIMIT_EXCEEDED)'
-            
-        # 5. Passed all checks -> return warranty type
-        return str(row['warranty_type']).strip().upper()
+        
+        # 4. WARRANT: check period only
+        if wt == 'WARRANT':
+            if within_period:
+                return 'WARRANT'
+            else:
+                return 'NOT_COVERED'
+        
+        # 5. INSURANCE, WARRANT: conditional split
+        if wt == 'INSURANCE, WARRANT' or wt == 'INSURANCE,WARRANT':
+            if within_period:
+                return 'WARRANT'
+            else:
+                return 'INSURANCE'
+        
+        # 6. INSURANCE: always INSURANCE if covered
+        if wt == 'INSURANCE':
+            return 'INSURANCE'
+        
+        # 7. No mapping / unknown type → NOT_COVERED
+        if wt == '' or wt == 'NOT_COVERED' or wt == 'NAN' or wt == 'NONE':
+            return 'NOT_COVERED'
+        
+        # Fallback: return the warranty_type as-is
+        return wt
 
     out['warranty_coverage'] = out.apply(determine_warranty, axis=1)
     
@@ -455,7 +509,7 @@ def standardize_service_items(df, asset_df=pd.DataFrame(), mapping_df=pd.DataFra
         out['delivery_date'] = pd.NaT
     
     out['source_system'] = 'service_items'
-    out['created_at'] = pd.to_datetime(out['created_at'])
+    out['created_at'] = pd.to_datetime(out['created_at'], errors='coerce', format='mixed')
     
     # Select columns (including delivery_date)
     final_cols = ['source_system', 'created_at', 'order_number', 'vehicle_plate', 'sku', 'item_name', 'erp_product_id',
@@ -568,7 +622,7 @@ def standardize_part_usage(df, asset_df=pd.DataFrame(), mapping_df=pd.DataFrame(
         out = merged
         
     out['source_system'] = 'part_usage'
-    out['created_at'] = pd.to_datetime(out['created_at'])
+    out['created_at'] = pd.to_datetime(out['created_at'], errors='coerce', format='mixed')
 
     final_cols = ['source_system', 'created_at', 'order_number', 'vehicle_plate', 'sku', 'item_name', 'erp_product_id',
                   'item_type', 'service_type', 'service_location_name', 'completed_by', 'customer_type',

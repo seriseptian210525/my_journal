@@ -137,8 +137,38 @@ class PartUsageService:
             axis=1
         )
         
-        # Cleanup
+        # Cleanup intermediary join columns
         merged = merged.drop(columns=['_join_plate', '_asset_customer_type', '_asset_model', '_asset_delivery_date'], errors='ignore')
+        
+        # --- ROBUST SAFETY NET (Phase 12) ---
+        print("   🛡️ Applying Robust Safety Net for Missing Data...")
+        
+        # 1. Forward Fill within the same plate (if history exists in this batch)
+        if 'created_at' in merged.columns:
+            merged['created_at_dt'] = pd.to_datetime(merged['created_at'], errors='coerce')
+            merged = merged.sort_values(['vehicle_plate', 'created_at_dt'])
+            
+            fill_cols = ['delivery_date', 'customer_type', 'bike_type']
+            for col in fill_cols:
+                if col in merged.columns:
+                    missing_before = merged[col].isna().sum() + (merged[col] == '').sum() if merged[col].dtype == 'object' else merged[col].isna().sum()
+                    if missing_before > 0:
+                        merged[col] = merged.groupby('vehicle_plate')[col].transform(lambda x: x.ffill().bfill())
+
+        # 2. String Fallback ('UNKNOWN') & Date Repair (using 'created_at')
+        merged['customer_type'] = merged['customer_type'].replace(['', 'nan', 'None'], pd.NA).fillna('UNKNOWN')
+        merged['bike_type'] = merged['bike_type'].replace(['', 'nan', 'None'], pd.NA).fillna('UNKNOWN')
+        
+        if 'created_at' in merged.columns and 'delivery_date' in merged.columns:
+            merged['delivery_date'] = merged['delivery_date'].fillna(merged['created_at'])
+            
+            # Robust Date Formatting: Avoid to_datetime array mixing bugs by taking first 10 chars (YYYY-MM-DD)
+            merged['delivery_date'] = merged['delivery_date'].astype(str).str.strip().str[:10]
+            merged['delivery_date'] = merged['delivery_date'].replace(['nan', 'NaT', 'None', '<NA>'], '')
+
+        # Re-sort to natural index order to preserve original upload chronology
+        merged = merged.sort_index()
+        # ------------------------------------
         
         # Stats
         enriched_count = merged['customer_type'].notna().sum()
