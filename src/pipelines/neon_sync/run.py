@@ -60,6 +60,12 @@ def run_pipeline():
     mapping_df = dl.load_gspread_data(SHEET_ID_MAPPINGS, WORKSHEET_MAPPINGS)
     print(f"   Shape: {mapping_df.shape}")
     
+    # Safety check: abort if critical data failed to load
+    if mapping_df.empty:
+        raise RuntimeError("❌ ABORTED: Mappings DataFrame is empty (possible Google API error). Re-run pipeline.")
+    if asset_df.empty:
+        raise RuntimeError("❌ ABORTED: Asset List DataFrame is empty (possible Google API error). Re-run pipeline.")
+    
     # --- INCREMENTAL MODE: Get Max Date from Neon ---
     max_date_filter = None
     if pipeline_mode == 'incremental':
@@ -300,6 +306,12 @@ def run_pipeline():
         
         print(f"   📊 Total rows exported: {len(final_df)}")
         print(f"   ✅ Export successful. Google Drive File ID: {file_id}")
+        
+        # Also save locally for Streamlit cache
+        local_output_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), 'output', 'unified_part_logs_latest.csv')
+        os.makedirs(os.path.dirname(local_output_path), exist_ok=True)
+        final_df.to_csv(local_output_path, index=False)
+        print(f"   💾 Local copy saved: {local_output_path}")
         
     except Exception as e:
         print(f"❌ Error Exporting to Google Drive: {e}")

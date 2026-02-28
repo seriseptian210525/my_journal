@@ -52,15 +52,25 @@ class NeonSyncService:
         return self._data_loader
         
     def _get_drive_dataframe(self):
-        """Fetches the latest CSV from Google Drive, caches it in memory."""
+        """Fetches the latest CSV, caches it in memory.
+        Priority: 1) RAM cache  2) Local file  3) Google Drive download
+        """
         if self._cached_df is not None:
             return self._cached_df
-            
+        
+        # Try local file first (faster, guaranteed same as last pipeline run)
+        local_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            'output', 'unified_part_logs_latest.csv'
+        )
+        
         try:
-            print("📥 Fetching latest data from Google Drive instead of Neon...")
-            # We use streamlit cache indirectly by caching it at the service level, 
-            # but for true streamlit caching we'll wrap it in the UI file.
-            self._cached_df = self.data_loader.load_csv_from_drive(self.gdrive_folder_id, self.gdrive_filename)
+            if os.path.exists(local_path):
+                print(f"📂 Loading data from local cache: {local_path}")
+                self._cached_df = pd.read_csv(local_path, low_memory=False)
+            else:
+                print("📥 Local cache not found, fetching from Google Drive...")
+                self._cached_df = self.data_loader.load_csv_from_drive(self.gdrive_folder_id, self.gdrive_filename)
             
             # Ensure critical datetime columns
             if 'created_at' in self._cached_df.columns:
@@ -70,8 +80,15 @@ class NeonSyncService:
                 
             return self._cached_df
         except Exception as e:
-            print(f"❌ Failed to load from Google Drive: {e}")
+            print(f"❌ Failed to load data: {e}")
             return pd.DataFrame()
+    
+    def clear_cache(self):
+        """Force clear the in-memory cached DataFrame.
+        Call this after Refresh Cloud Data to ensure Streamlit reads fresh data.
+        """
+        self._cached_df = None
+        print("🧹 Cache cleared. Next data request will reload from disk/Drive.")
 
     def get_max_total_pk(self) -> pd.DataFrame:
         """

@@ -81,13 +81,26 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
                             run_pipeline()
                         
                         log_output = output_buffer.getvalue()
+                        
+                        # Clear cache so Streamlit reads the fresh local CSV
+                        neon_service.clear_cache()
+                        
                         st.success("✅ **Cloud Data Refresh Completed Successfully!**")
                         # We dump the terminal log into an expander so they know what happened 
                         with st.expander("Show Execution Logs", expanded=False):
                             st.code(log_output, language='bash')
+                        
+                        # Auto-reload the page to reflect new data
+                        st.rerun()
                             
                     except Exception as e:
                         st.error(f"❌ Backup failed: {str(e)}")
+            
+            # Force Clear Cache button — manually invalidate cached data
+            if st.button("🧹 Clear Cache", type="tertiary", use_container_width=True, help="Force clear cached data. Use after manual CSV updates."):
+                neon_service.clear_cache()
+                st.success("🧹 Cache cleared! Data will reload from the latest local/Drive CSV.")
+                st.rerun()
         else:
             st.warning("Cloud Data connection not available. Check environment credentials.")
 
