@@ -67,40 +67,53 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
         st.info("Jalankan pipeline ETL penuh untuk menarik ulang semua data Google Sheets, membersihkan data, dan me-refresh file Cloud CSV di Google Drive.")
         
         if CLOUD_DATA_AVAILABLE:
-            if st.button("🔄 Refresh Cloud Data", type="secondary", use_container_width=True):
-                with st.spinner("Executing Full ETL Pipeline (Fetching from 3 sheets, normalizing, dropping Neon DB, uploading tracking CSV to Drive)..."):
-                    try:
-                        import sys
-                        from io import StringIO
-                        # We use run_pipeline from the extraction root, modifying std buffer to capture print logs
-                        import contextlib
+            if st.button("🔄 Refresh Cloud Data", type="secondary", use_container_width=True,
+                         help="Backfill part_usage → Full ETL Pipeline → Refresh Dashboard"):
+                progress = st.progress(0, text="Initializing...")
+                log_parts = []
+                
+                try:
+                    import contextlib
+                    from io import StringIO
+                    
+                    # --- Step 1: Backfill part_usage sheet ---
+                    progress.progress(10, text="🔍 Step 1/3: Backfilling part_usage sheet [customer_type, bike_type, delivery_date]...")
+                    
+                    bf_buffer = StringIO()
+                    with contextlib.redirect_stdout(bf_buffer):
+                        from src.services.part_usage_service import PartUsageService
+                        pu_service = PartUsageService()
+                        bf_stats = pu_service.backfill_part_usage_sheet()
+                    log_parts.append("=== BACKFILL PART USAGE ===\n" + bf_buffer.getvalue())
+                    
+                    # --- Step 2: Run Full ETL Pipeline ---
+                    progress.progress(30, text="⚙️ Step 2/3: Running Full ETL Pipeline (3 sheets → normalize → Drive CSV)...")
+                    
+                    etl_buffer = StringIO()
+                    with contextlib.redirect_stdout(etl_buffer):
                         from src.pipelines.neon_sync.run import run_pipeline
+                        run_pipeline()
+                    log_parts.append("\n=== ETL PIPELINE ===\n" + etl_buffer.getvalue())
+                    
+                    # --- Step 3: Clear cache + rerun ---
+                    progress.progress(95, text="🧹 Step 3/3: Clearing cache...")
+                    neon_service.clear_cache()
+                    
+                    progress.progress(100, text="✅ Done!")
+                    
+                    # Show results
+                    bf_total = bf_stats.get('customer_type', 0) + bf_stats.get('bike_type', 0) + bf_stats.get('delivery_date', 0)
+                    if bf_total > 0:
+                        st.info(f"🔧 Backfill: {bf_stats['customer_type']} customer_type, {bf_stats['bike_type']} bike_type, {bf_stats['delivery_date']} delivery_date cells fixed")
+                    
+                    st.success("✅ **Cloud Data Refresh Completed Successfully!**")
+                    with st.expander("Show Execution Logs", expanded=False):
+                        st.code("\n".join(log_parts), language='bash')
+                    
+                    st.rerun()
                         
-                        output_buffer = StringIO()
-                        with contextlib.redirect_stdout(output_buffer):
-                            run_pipeline()
-                        
-                        log_output = output_buffer.getvalue()
-                        
-                        # Clear cache so Streamlit reads the fresh local CSV
-                        neon_service.clear_cache()
-                        
-                        st.success("✅ **Cloud Data Refresh Completed Successfully!**")
-                        # We dump the terminal log into an expander so they know what happened 
-                        with st.expander("Show Execution Logs", expanded=False):
-                            st.code(log_output, language='bash')
-                        
-                        # Auto-reload the page to reflect new data
-                        st.rerun()
-                            
-                    except Exception as e:
-                        st.error(f"❌ Backup failed: {str(e)}")
-            
-            # Force Clear Cache button — manually invalidate cached data
-            if st.button("🧹 Clear Cache", type="tertiary", use_container_width=True, help="Force clear cached data. Use after manual CSV updates."):
-                neon_service.clear_cache()
-                st.success("🧹 Cache cleared! Data will reload from the latest local/Drive CSV.")
-                st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Refresh failed: {str(e)}")
         else:
             st.warning("Cloud Data connection not available. Check environment credentials.")
 

@@ -208,3 +208,147 @@ class PartUsageService:
             key_columns=self.deduplication_keys
         )
 
+    def backfill_part_usage_sheet(self) -> dict:
+        """
+        Reads the part_usage GSheet, backfills empty [customer_type, bike_type, delivery_date]
+        using Asset List lookup + ffill/bfill + fallback, then writes changes back.
+        
+        Returns stats dict with counts of cells fixed.
+        """
+        import gspread
+        
+        stats = {'customer_type': 0, 'bike_type': 0, 'delivery_date': 0, 'total_rows_checked': 0}
+        target_cols = ['customer_type', 'bike_type', 'delivery_date']
+        
+        print("🔍 Backfill Part Usage: Reading sheet...")
+        
+        try:
+            df = self.data_loader.load_gspread_data(self.sheet_id, self.worksheet_name)
+        except Exception as e:
+            print(f"   ❌ Failed to load part_usage sheet: {e}")
+            return stats
+        
+        if df.empty:
+            print("   ⚠️ Part Usage sheet is empty.")
+            return stats
+        
+        stats['total_rows_checked'] = len(df)
+        
+        # Check for missing values
+        def is_empty(val):
+            return pd.isna(val) or str(val).strip().lower() in ['', 'nan', 'none', 'nat', '<na>']
+        
+        missing_mask = pd.DataFrame(False, index=df.index, columns=target_cols)
+        for col in target_cols:
+            if col in df.columns:
+                missing_mask[col] = df[col].apply(is_empty)
+        
+        total_missing = missing_mask.any(axis=1).sum()
+        if total_missing == 0:
+            print("   ✅ No missing values found. Backfill not needed.")
+            return stats
+        
+        print(f"   ⚠️ Found {total_missing} rows with missing data. Backfilling...")
+        
+        # --- Backfill Logic (reuse _enrich_from_asset_list approach) ---
+        
+        # 1. Load Asset List for lookup
+        try:
+            asset_df = self.data_loader.load_gspread_data(SHEET_ID_ASSET_LIST, WORKSHEET_ASSET)
+        except Exception:
+            asset_df = pd.DataFrame()
+        
+        if not asset_df.empty:
+            # Build lookup dict: plate -> {customer_type, bike_type, delivery_date}
+            asset_clean = asset_df.copy()
+            asset_clean['_plate'] = asset_clean['Plat Nomor'].astype(str).str.strip().str.upper()
+            
+            delivery_col = None
+            for col in ['Delivery - Outbone', 'Delivery Date', 'delivery_date']:
+                if col in asset_clean.columns:
+                    delivery_col = col
+                    break
+            
+            lookup = {}
+            for _, row in asset_clean.iterrows():
+                plate = row['_plate']
+                if plate not in lookup:
+                    lookup[plate] = {
+                        'customer_type': str(row.get('Tempat Sewa Unit', '')).strip(),
+                        'bike_type': str(row.get('Model', '')).strip(),
+                        'delivery_date': str(row.get(delivery_col, '')).strip() if delivery_col else ''
+                    }
+            
+            # Apply Asset List lookup to empty cells
+            if 'vehicle_plate' in df.columns:
+                for idx in df.index:
+                    plate = str(df.at[idx, 'vehicle_plate']).strip().upper()
+                    if plate in lookup:
+                        for col in target_cols:
+                            if col in df.columns and missing_mask.at[idx, col]:
+                                val = lookup[plate].get(col, '')
+                                if val and val.lower() not in ['', 'nan', 'none', 'nat']:
+                                    df.at[idx, col] = val
+                                    missing_mask.at[idx, col] = False
+        
+        # 2. ffill + bfill per vehicle_plate
+        if 'vehicle_plate' in df.columns:
+            for col in target_cols:
+                if col in df.columns and missing_mask[col].any():
+                    df[col] = df.groupby('vehicle_plate')[col].transform(
+                        lambda x: x.replace(['', 'nan', 'None', 'NaT'], pd.NA).ffill().bfill()
+                    )
+                    # Re-check
+                    missing_mask[col] = df[col].apply(is_empty)
+        
+        # 3. Fallback: UNKNOWN for strings, created_at for delivery_date
+        for col in ['customer_type', 'bike_type']:
+            if col in df.columns:
+                still_empty = missing_mask[col]
+                if still_empty.any():
+                    df.loc[still_empty, col] = 'UNKNOWN'
+                    missing_mask.loc[still_empty, col] = False
+        
+        if 'delivery_date' in df.columns and 'created_at' in df.columns:
+            still_empty = missing_mask['delivery_date']
+            if still_empty.any():
+                df.loc[still_empty, 'delivery_date'] = df.loc[still_empty, 'created_at']
+                missing_mask.loc[still_empty, 'delivery_date'] = False
+        
+        # --- Write changes back to GSheet via batch update ---
+        print("   📤 Writing backfilled data to Google Sheet...")
+        
+        try:
+            sheet = self.data_loader.client.open_by_key(self.sheet_id)
+            worksheet = sheet.worksheet(self.worksheet_name)
+            headers = worksheet.row_values(1)
+            
+            # Build batch update cells
+            updates = []
+            for col in target_cols:
+                if col not in headers:
+                    continue
+                col_idx = headers.index(col) + 1  # 1-indexed for gspread
+                
+                # Original missing mask was True for these — now they have values
+                for df_row_idx in df.index:
+                    sheet_row = int(df_row_idx) + 2  # +2 because header is row 1, DataFrame is 0-indexed
+                    new_val = str(df.at[df_row_idx, col]) if pd.notna(df.at[df_row_idx, col]) else ''
+                    if new_val and new_val.lower() not in ['nan', 'none', 'nat']:
+                        updates.append(gspread.Cell(row=sheet_row, col=col_idx, value=new_val))
+                        stats[col] += 1
+            
+            if updates:
+                # Batch update in chunks of 5000
+                chunk_size = 5000
+                for i in range(0, len(updates), chunk_size):
+                    chunk = updates[i:i+chunk_size]
+                    worksheet.update_cells(chunk)
+                    print(f"   ✅ Batch {i//chunk_size + 1}: Updated {len(chunk)} cells")
+            
+            print(f"   ✅ Backfill complete: customer_type={stats['customer_type']}, bike_type={stats['bike_type']}, delivery_date={stats['delivery_date']}")
+            
+        except Exception as e:
+            print(f"   ❌ Batch update failed: {e}")
+        
+        return stats
