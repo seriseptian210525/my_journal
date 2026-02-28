@@ -253,6 +253,16 @@ class PartUsageService:
         
         print(f"   ⚠️ Found {total_missing} rows with missing data. Backfilling...")
         
+        # Detect plate column name
+        plate_col = None
+        for col_candidate in ['vehicle_license_plate', 'Vehicle License Plate', 'vehicle_plate', 'plat_nomor']:
+            if col_candidate in df.columns:
+                plate_col = col_candidate
+                break
+        
+        if not plate_col:
+            print("   ⚠️ No plate column found in part_usage sheet, skipping Asset List lookup")
+        
         # --- Backfill Logic (reuse _enrich_from_asset_list approach) ---
         
         # 1. Load Asset List for lookup
@@ -283,9 +293,9 @@ class PartUsageService:
                     }
             
             # Apply Asset List lookup to empty cells
-            if 'vehicle_plate' in df.columns:
+            if plate_col:
                 for idx in df.index:
-                    plate = str(df.at[idx, 'vehicle_plate']).strip().upper().replace(' ', '')
+                    plate = str(df.at[idx, plate_col]).strip().upper().replace(' ', '')
                     if plate in lookup:
                         for col in target_cols:
                             if col in df.columns and missing_mask.at[idx, col]:
@@ -294,11 +304,11 @@ class PartUsageService:
                                     df.at[idx, col] = val
                                     missing_mask.at[idx, col] = False
         
-        # 2. ffill + bfill per vehicle_plate
-        if 'vehicle_plate' in df.columns:
+        # 2. ffill + bfill per plate
+        if plate_col:
             for col in target_cols:
                 if col in df.columns and missing_mask[col].any():
-                    df[col] = df.groupby('vehicle_plate')[col].transform(
+                    df[col] = df.groupby(plate_col)[col].transform(
                         lambda x: x.replace(['', 'nan', 'None', 'NaT'], pd.NA).ffill().bfill()
                     )
                     # Re-check
