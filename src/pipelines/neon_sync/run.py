@@ -307,12 +307,6 @@ def run_pipeline():
         print(f"   📊 Total rows exported: {len(final_df)}")
         print(f"   ✅ Export successful. Google Drive File ID: {file_id}")
         
-        # Also save locally for Streamlit cache
-        local_output_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), 'output', 'unified_part_logs_latest.csv')
-        os.makedirs(os.path.dirname(local_output_path), exist_ok=True)
-        final_df.to_csv(local_output_path, index=False)
-        print(f"   💾 Local copy saved: {local_output_path}")
-        
     except Exception as e:
         print(f"❌ Error Exporting to Google Drive: {e}")
         raise e

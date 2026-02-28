@@ -52,25 +52,13 @@ class NeonSyncService:
         return self._data_loader
         
     def _get_drive_dataframe(self):
-        """Fetches the latest CSV, caches it in memory.
-        Priority: 1) RAM cache  2) Local file  3) Google Drive download
-        """
+        """Fetches the latest CSV from Google Drive, caches it in RAM."""
         if self._cached_df is not None:
             return self._cached_df
         
-        # Try local file first (faster, guaranteed same as last pipeline run)
-        local_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            'output', 'unified_part_logs_latest.csv'
-        )
-        
         try:
-            if os.path.exists(local_path):
-                print(f"📂 Loading data from local cache: {local_path}")
-                self._cached_df = pd.read_csv(local_path, low_memory=False)
-            else:
-                print("📥 Local cache not found, fetching from Google Drive...")
-                self._cached_df = self.data_loader.load_csv_from_drive(self.gdrive_folder_id, self.gdrive_filename)
+            print("📥 Fetching latest data from Google Drive...")
+            self._cached_df = self.data_loader.load_csv_from_drive(self.gdrive_folder_id, self.gdrive_filename)
             
             # Ensure critical datetime columns
             if 'created_at' in self._cached_df.columns:
@@ -80,7 +68,7 @@ class NeonSyncService:
                 
             return self._cached_df
         except Exception as e:
-            print(f"❌ Failed to load data: {e}")
+            print(f"❌ Failed to load from Google Drive: {e}")
             return pd.DataFrame()
     
     def clear_cache(self):
