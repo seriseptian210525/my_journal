@@ -243,6 +243,15 @@ class PartUsageService:
             if col in df.columns:
                 missing_mask[col] = df[col].apply(is_empty)
         
+        # Extra check: delivery_date that equals created_at is a fallback, not real data
+        if 'delivery_date' in df.columns and 'created_at' in df.columns:
+            dd = pd.to_datetime(df['delivery_date'], errors='coerce').dt.date
+            ca = pd.to_datetime(df['created_at'], errors='coerce').dt.date
+            fallback_mask = (dd == ca) & dd.notna()
+            missing_mask['delivery_date'] = missing_mask['delivery_date'] | fallback_mask
+            if fallback_mask.sum() > 0:
+                print(f"   🔎 Detected {fallback_mask.sum()} delivery_dates matching created_at (fallback). Marking for re-fill.")
+        
         total_missing = missing_mask.any(axis=1).sum()
         if total_missing == 0:
             print("   ✅ No missing values found. Backfill not needed.")
