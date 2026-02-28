@@ -236,7 +236,7 @@ class PartUsageService:
         
         # Check for missing values
         def is_empty(val):
-            return pd.isna(val) or str(val).strip().lower() in ['', 'nan', 'none', 'nat', '<na>']
+            return pd.isna(val) or str(val).strip().lower() in ['', 'nan', 'none', 'nat', '<na>', 'unknown']
         
         missing_mask = pd.DataFrame(False, index=df.index, columns=target_cols)
         for col in target_cols:
