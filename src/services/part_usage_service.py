@@ -248,6 +248,9 @@ class PartUsageService:
             print("   ✅ No missing values found. Backfill not needed.")
             return stats
         
+        # Save original missing mask for batch update (only write cells that were originally empty)
+        original_missing = missing_mask.copy()
+        
         print(f"   ⚠️ Found {total_missing} rows with missing data. Backfilling...")
         
         # --- Backfill Logic (reuse _enrich_from_asset_list approach) ---
@@ -261,7 +264,7 @@ class PartUsageService:
         if not asset_df.empty:
             # Build lookup dict: plate -> {customer_type, bike_type, delivery_date}
             asset_clean = asset_df.copy()
-            asset_clean['_plate'] = asset_clean['Plat Nomor'].astype(str).str.strip().str.upper()
+            asset_clean['_plate'] = asset_clean['Plat Nomor'].astype(str).str.strip().str.upper().str.replace(' ', '')
             
             delivery_col = None
             for col in ['Delivery - Outbone', 'Delivery Date', 'delivery_date']:
@@ -282,7 +285,7 @@ class PartUsageService:
             # Apply Asset List lookup to empty cells
             if 'vehicle_plate' in df.columns:
                 for idx in df.index:
-                    plate = str(df.at[idx, 'vehicle_plate']).strip().upper()
+                    plate = str(df.at[idx, 'vehicle_plate']).strip().upper().replace(' ', '')
                     if plate in lookup:
                         for col in target_cols:
                             if col in df.columns and missing_mask.at[idx, col]:
@@ -323,18 +326,27 @@ class PartUsageService:
             worksheet = sheet.worksheet(self.worksheet_name)
             headers = worksheet.row_values(1)
             
-            # Build batch update cells
+            # Build batch update cells — only update cells that were originally empty
             updates = []
             for col in target_cols:
                 if col not in headers:
                     continue
                 col_idx = headers.index(col) + 1  # 1-indexed for gspread
                 
-                # Original missing mask was True for these — now they have values
                 for df_row_idx in df.index:
-                    sheet_row = int(df_row_idx) + 2  # +2 because header is row 1, DataFrame is 0-indexed
-                    new_val = str(df.at[df_row_idx, col]) if pd.notna(df.at[df_row_idx, col]) else ''
-                    if new_val and new_val.lower() not in ['nan', 'none', 'nat']:
+                    if not original_missing.at[df_row_idx, col]:
+                        continue  # Skip cells that were NOT originally empty
+                    sheet_row = int(df_row_idx) + 2  # +2: header=row1, DataFrame=0-indexed
+                    raw_val = df.at[df_row_idx, col]
+                    # Format delivery_date as YYYY-MM-DD
+                    if col == 'delivery_date' and pd.notna(raw_val):
+                        try:
+                            new_val = pd.to_datetime(raw_val, errors='coerce').strftime('%Y-%m-%d')
+                        except Exception:
+                            new_val = str(raw_val).strip()[:10]
+                    else:
+                        new_val = str(raw_val).strip() if pd.notna(raw_val) else ''
+                    if new_val and new_val.lower() not in ['nan', 'none', 'nat', '<na>']:
                         updates.append(gspread.Cell(row=sheet_row, col=col_idx, value=new_val))
                         stats[col] += 1
             
