@@ -283,11 +283,24 @@ class PartUsageService:
         
         # --- Backfill Logic (reuse _enrich_from_asset_list approach) ---
         
-        # 1. Load Asset List for lookup
-        try:
-            asset_df = self.data_loader.load_gspread_data(SHEET_ID_ASSET_LIST, WORKSHEET_ASSET)
-        except Exception:
-            asset_df = pd.DataFrame()
+        # 1. Load Asset List for lookup (with retry)
+        import time
+        asset_df = pd.DataFrame()
+        for attempt in range(1, 4):
+            try:
+                asset_df = self.data_loader.load_gspread_data(SHEET_ID_ASSET_LIST, WORKSHEET_ASSET)
+                if not asset_df.empty:
+                    print(f"   📚 Asset List loaded: {len(asset_df)} rows")
+                    break
+                print(f"   ⚠️ Asset List empty (attempt {attempt}/3). Retrying in 3s...")
+                time.sleep(3)
+            except Exception as e:
+                print(f"   ⚠️ Asset List fetch failed (attempt {attempt}/3): {e}")
+                if attempt < 3:
+                    time.sleep(3)
+        
+        if asset_df.empty:
+            print("   ❌ Asset List empty after 3 retries. Using ffill/fallback only.")
         
         if not asset_df.empty:
             # Build lookup dict: plate -> {customer_type, bike_type, delivery_date}

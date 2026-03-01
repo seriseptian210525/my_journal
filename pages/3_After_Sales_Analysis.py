@@ -68,43 +68,60 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
         
         if CLOUD_DATA_AVAILABLE:
             if st.button("🔄 Refresh Cloud Data", type="secondary", use_container_width=True,
-                         help="Backfill part_usage → Full ETL Pipeline → Refresh Dashboard"):
+                         help="Smart Repair part_usage → Full ETL Pipeline → Refresh Dashboard"):
+                import subprocess, sys, os
                 progress = st.progress(0, text="Initializing...")
                 log_parts = []
+                project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                env = os.environ.copy()
+                env['PYTHONIOENCODING'] = 'utf-8'
+                env['PYTHONPATH'] = project_root
                 
                 try:
-                    import contextlib
-                    from io import StringIO
+                    # --- Step 1: Smart Repair part_usage sheet ---
+                    progress.progress(10, text="🔍 Step 1/3: Smart Repair part_usage sheet [customer_type, bike_type, delivery_date]...")
                     
-                    # --- Step 1: Backfill part_usage sheet ---
-                    progress.progress(10, text="🔍 Step 1/3: Backfilling part_usage sheet [customer_type, bike_type, delivery_date]...")
+                    bf_script = (
+                        "import sys; sys.path.insert(0, '.');"
+                        "from dotenv import load_dotenv; load_dotenv();"
+                        "from src.services.part_usage_service import PartUsageService;"
+                        "svc = PartUsageService();"
+                        "stats = svc.backfill_part_usage_sheet();"
+                        "print(f'BACKFILL_RESULT: {stats}')"
+                    )
+                    result_bf = subprocess.run(
+                        [sys.executable, '-c', bf_script],
+                        capture_output=True, text=True, timeout=300,
+                        cwd=project_root, env=env
+                    )
+                    bf_output = result_bf.stdout + result_bf.stderr
+                    log_parts.append("=== SMART REPAIR PART USAGE ===\n" + bf_output)
                     
-                    bf_buffer = StringIO()
-                    with contextlib.redirect_stdout(bf_buffer):
-                        from src.services.part_usage_service import PartUsageService
-                        pu_service = PartUsageService()
-                        bf_stats = pu_service.backfill_part_usage_sheet()
-                    log_parts.append("=== BACKFILL PART USAGE ===\n" + bf_buffer.getvalue())
+                    if result_bf.returncode != 0:
+                        st.warning(f"⚠️ Smart Repair finished with warnings. Check logs for details.")
                     
-                    # --- Step 2: Run Full ETL Pipeline ---
+                    # --- Step 2: Run Full ETL Pipeline (fresh process) ---
                     progress.progress(30, text="⚙️ Step 2/3: Running Full ETL Pipeline (3 sheets → normalize → Drive CSV)...")
                     
-                    etl_buffer = StringIO()
-                    with contextlib.redirect_stdout(etl_buffer):
-                        from src.pipelines.neon_sync.run import run_pipeline
-                        run_pipeline()
-                    log_parts.append("\n=== ETL PIPELINE ===\n" + etl_buffer.getvalue())
+                    result_etl = subprocess.run(
+                        [sys.executable, os.path.join('src', 'pipelines', 'neon_sync', 'run.py'), '--mode', 'full'],
+                        capture_output=True, text=True, timeout=600,
+                        cwd=project_root, env=env
+                    )
+                    etl_output = result_etl.stdout + result_etl.stderr
+                    log_parts.append("\n=== ETL PIPELINE ===\n" + etl_output)
+                    
+                    if result_etl.returncode != 0:
+                        st.error(f"❌ Pipeline failed (exit code {result_etl.returncode}). Check logs below.")
+                        with st.expander("Show Error Logs", expanded=True):
+                            st.code("\n".join(log_parts), language='bash')
+                        st.stop()
                     
                     # --- Step 3: Clear cache + rerun ---
-                    progress.progress(95, text="🧹 Step 3/3: Clearing cache...")
+                    progress.progress(95, text="🧹 Step 3/3: Clearing cache & reloading...")
                     neon_service.clear_cache()
                     
                     progress.progress(100, text="✅ Done!")
-                    
-                    # Show results
-                    bf_total = bf_stats.get('customer_type', 0) + bf_stats.get('bike_type', 0) + bf_stats.get('delivery_date', 0)
-                    if bf_total > 0:
-                        st.info(f"🔧 Backfill: {bf_stats['customer_type']} customer_type, {bf_stats['bike_type']} bike_type, {bf_stats['delivery_date']} delivery_date cells fixed")
                     
                     st.success("✅ **Cloud Data Refresh Completed Successfully!**")
                     with st.expander("Show Execution Logs", expanded=False):
@@ -112,8 +129,13 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
                     
                     st.rerun()
                         
+                except subprocess.TimeoutExpired:
+                    st.error("❌ Pipeline timed out. Try running from CLI: `python src/pipelines/neon_sync/run.py --mode full`")
                 except Exception as e:
                     st.error(f"❌ Refresh failed: {str(e)}")
+                    if log_parts:
+                        with st.expander("Show Logs", expanded=True):
+                            st.code("\n".join(log_parts), language='bash')
         else:
             st.warning("Cloud Data connection not available. Check environment credentials.")
 
