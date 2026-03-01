@@ -60,14 +60,23 @@ class PartUsageService:
         if df.empty:
             return df
         
-        # Load Asset List
-        try:
-            asset_df = self.data_loader.load_gspread_data(SHEET_ID_ASSET_LIST, WORKSHEET_ASSET)
-            if asset_df.empty:
-                print("   ⚠️ Asset List is empty, skipping enrichment")
-                return df
-        except Exception as e:
-            print(f"   ⚠️ Could not load Asset List: {e}")
+        # Load Asset List (with retry for transient API errors)
+        import time
+        asset_df = pd.DataFrame()
+        for attempt in range(1, 4):
+            try:
+                asset_df = self.data_loader.load_gspread_data(SHEET_ID_ASSET_LIST, WORKSHEET_ASSET)
+                if not asset_df.empty:
+                    break
+                print(f"   ⚠️ Asset List empty (attempt {attempt}/3). Retrying in 3s...")
+                time.sleep(3)
+            except Exception as e:
+                print(f"   ⚠️ Asset List fetch failed (attempt {attempt}/3): {e}")
+                if attempt < 3:
+                    time.sleep(3)
+        
+        if asset_df.empty:
+            print("   ❌ Asset List is empty after 3 retries, skipping enrichment")
             return df
         
         print(f"   📚 Enriching from Asset List ({len(asset_df)} assets)...")

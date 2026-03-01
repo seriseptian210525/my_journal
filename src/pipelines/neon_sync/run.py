@@ -50,17 +50,33 @@ def run_pipeline():
     # --- 0. PRELOAD AUXILIARY DATA (Enrichment Sources) ---
     print("\n📚 Loading Auxiliary Data...")
     
+    import time
+    MAX_RETRIES = 3
+    RETRY_DELAY = 3  # seconds
+    
     # Asset List (for Customer Type + Delivery Date)
-    print("   Fetching Asset List...")
-    asset_df = dl.load_gspread_data(SHEET_ID_ASSET_LIST, WORKSHEET_ASSET)
-    print(f"   Shape: {asset_df.shape}")
+    asset_df = pd.DataFrame()
+    for attempt in range(1, MAX_RETRIES + 1):
+        print(f"   Fetching Asset List (attempt {attempt}/{MAX_RETRIES})...")
+        asset_df = dl.load_gspread_data(SHEET_ID_ASSET_LIST, WORKSHEET_ASSET)
+        if not asset_df.empty:
+            print(f"   Shape: {asset_df.shape}")
+            break
+        print(f"   ⚠️ Empty response. Retrying in {RETRY_DELAY}s...")
+        time.sleep(RETRY_DELAY)
     
     # Mappings (for Old Price + Warranty Config)
-    print("   Fetching Mappings...")
-    mapping_df = dl.load_gspread_data(SHEET_ID_MAPPINGS, WORKSHEET_MAPPINGS)
-    print(f"   Shape: {mapping_df.shape}")
+    mapping_df = pd.DataFrame()
+    for attempt in range(1, MAX_RETRIES + 1):
+        print(f"   Fetching Mappings (attempt {attempt}/{MAX_RETRIES})...")
+        mapping_df = dl.load_gspread_data(SHEET_ID_MAPPINGS, WORKSHEET_MAPPINGS)
+        if not mapping_df.empty:
+            print(f"   Shape: {mapping_df.shape}")
+            break
+        print(f"   ⚠️ Empty response. Retrying in {RETRY_DELAY}s...")
+        time.sleep(RETRY_DELAY)
     
-    # Safety check: abort if critical data failed to load
+    # Safety check: abort if critical data failed to load after retries
     if mapping_df.empty:
         raise RuntimeError("❌ ABORTED: Mappings DataFrame is empty (possible Google API error). Re-run pipeline.")
     if asset_df.empty:
