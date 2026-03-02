@@ -82,7 +82,8 @@ def get_secret(key, section=None, default=''):
                 key_map = {
                     'SHEET_ID_SERVICE_ITEMS': 'service_items',
                     'SHEET_ID_MAPPINGS': 'mappings',
-                    'SHEET_ID_OUTPUT_REVIEW': 'part_usage'
+                    'SHEET_ID_OUTPUT_REVIEW': 'part_usage',
+                    'SHEET_ID_ASSET_LIST': 'asset_list'
                 }
                 toml_key = key_map.get(key)
                 if toml_key and toml_key in st.secrets["sheets"]:
@@ -132,8 +133,8 @@ SHEET_ID_CABANG_DEPOK = os.getenv("SHEET_ID_CABANG_DEPOK")
 WORKSHEET_CABANG_DEPOK = os.getenv("WORKSHEET_CABANG_DEPOK")
 SHEET_ID_CABANG_BEKASI = os.getenv("SHEET_ID_CABANG_BEKASI")
 WORKSHEET_CABANG_BEKASI = os.getenv("WORKSHEET_CABANG_BEKASI")
-SHEET_ID_ASSET_LIST = os.getenv("SHEET_ID_ASSET_LIST")
-WORKSHEET_ASSET = os.getenv("WORKSHEET_ASSET")
+SHEET_ID_ASSET_LIST = get_secret("SHEET_ID_ASSET_LIST", "sheets")
+WORKSHEET_ASSET = os.getenv("WORKSHEET_ASSET", "Asset List")
 SHEET_ID_MEKANIK = os.getenv("SHEET_ID_MEKANIK")
 WORKSHEET_MEKANIK = os.getenv("WORKSHEET_MEKANIK")
 SHEET_ID_OUTPUT = os.getenv("SHEET_ID_OUTPUT")

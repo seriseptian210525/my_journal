@@ -77,6 +77,35 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
                 env['PYTHONIOENCODING'] = 'utf-8'
                 env['PYTHONPATH'] = project_root
                 
+                # Inject all config secrets into subprocess env
+                # (subprocess can't access st.secrets, so we pass them as env vars)
+                from src.common.config import (
+                    SHEET_ID_ASSET_LIST, WORKSHEET_ASSET,
+                    SHEET_ID_MAPPINGS, WORKSHEET_MAPPINGS,
+                    SHEET_ID_SERVICE_ITEMS, WORKSHEET_SERVICE_ITEMS,
+                    SHEET_ID_OUTPUT_REVIEW, WORKSHEET_PART_USAGE,
+                    SHEET_ID_SERVICE_GRAB, WORKSHEET_SERVICE_GRAB,
+                    NEON_DB_CONNECTION_STRING, SERVICE_ACCOUNT_FILE
+                )
+                secrets_to_inject = {
+                    'SHEET_ID_ASSET_LIST': SHEET_ID_ASSET_LIST,
+                    'WORKSHEET_ASSET': WORKSHEET_ASSET,
+                    'SHEET_ID_MAPPINGS': SHEET_ID_MAPPINGS,
+                    'WORKSHEET_MAPPINGS': WORKSHEET_MAPPINGS,
+                    'SHEET_ID_SERVICE_ITEMS': SHEET_ID_SERVICE_ITEMS,
+                    'WORKSHEET_SERVICE_ITEMS': WORKSHEET_SERVICE_ITEMS,
+                    'SHEET_ID_OUTPUT_REVIEW': SHEET_ID_OUTPUT_REVIEW,
+                    'WORKSHEET_PART_USAGE': WORKSHEET_PART_USAGE,
+                    'SHEET_ID_SERVICE_GRAB': SHEET_ID_SERVICE_GRAB,
+                    'WORKSHEET_SERVICE_GRAB': WORKSHEET_SERVICE_GRAB,
+                    'NEON_DB_CONNECTION_STRING': NEON_DB_CONNECTION_STRING,
+                    'GOOGLE_APPLICATION_CREDENTIALS': str(SERVICE_ACCOUNT_FILE) if SERVICE_ACCOUNT_FILE else '',
+                    'GDRIVE_OUTPUT_FOLDER_ID': os.getenv('GDRIVE_OUTPUT_FOLDER_ID', ''),
+                }
+                for k, v in secrets_to_inject.items():
+                    if v:
+                        env[k] = str(v)
+                
                 try:
                     # --- Step 1: Smart Repair part_usage sheet ---
                     progress.progress(10, text="🔍 Step 1/3: Smart Repair part_usage sheet [customer_type, bike_type, delivery_date]...")
