@@ -113,14 +113,8 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
                     progress.progress(10, text="🔍 Step 1/3: Smart Repair part_usage sheet [customer_type, bike_type, delivery_date]...")
                     
                     bf_script = (
-                        "import sys, os; sys.path.insert(0, '.');"
+                        "import sys; sys.path.insert(0, '.');"
                         "from dotenv import load_dotenv; load_dotenv();"
-                        "print(f'DEBUG ENV: SHEET_ID_ASSET_LIST={os.getenv(\"SHEET_ID_ASSET_LIST\", \"NOT_SET\")}');"
-                        "print(f'DEBUG ENV: WORKSHEET_ASSET={os.getenv(\"WORKSHEET_ASSET\", \"NOT_SET\")}');"
-                        "print(f'DEBUG ENV: GDRIVE_OUTPUT_FOLDER_ID={os.getenv(\"GDRIVE_OUTPUT_FOLDER_ID\", \"NOT_SET\")}');"
-                        "from src.common.config import SHEET_ID_ASSET_LIST, WORKSHEET_ASSET;"
-                        "print(f'DEBUG CONFIG: SHEET_ID_ASSET_LIST={SHEET_ID_ASSET_LIST}');"
-                        "print(f'DEBUG CONFIG: WORKSHEET_ASSET={WORKSHEET_ASSET}');"
                         "from src.services.part_usage_service import PartUsageService;"
                         "svc = PartUsageService();"
                         "stats = svc.backfill_part_usage_sheet();"
