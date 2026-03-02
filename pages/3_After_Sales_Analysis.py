@@ -77,34 +77,36 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
                 env['PYTHONIOENCODING'] = 'utf-8'
                 env['PYTHONPATH'] = project_root
                 
-                # Inject all config secrets into subprocess env
-                # (subprocess can't access st.secrets, so we pass them as env vars)
-                from src.common.config import (
-                    SHEET_ID_ASSET_LIST, WORKSHEET_ASSET,
-                    SHEET_ID_MAPPINGS, WORKSHEET_MAPPINGS,
-                    SHEET_ID_SERVICE_ITEMS, WORKSHEET_SERVICE_ITEMS,
-                    SHEET_ID_OUTPUT_REVIEW, WORKSHEET_PART_USAGE,
-                    SHEET_ID_SERVICE_GRAB, WORKSHEET_SERVICE_GRAB,
-                    NEON_DB_CONNECTION_STRING, SERVICE_ACCOUNT_FILE
-                )
-                secrets_to_inject = {
-                    'SHEET_ID_ASSET_LIST': SHEET_ID_ASSET_LIST,
-                    'WORKSHEET_ASSET': WORKSHEET_ASSET,
-                    'SHEET_ID_MAPPINGS': SHEET_ID_MAPPINGS,
-                    'WORKSHEET_MAPPINGS': WORKSHEET_MAPPINGS,
-                    'SHEET_ID_SERVICE_ITEMS': SHEET_ID_SERVICE_ITEMS,
-                    'WORKSHEET_SERVICE_ITEMS': WORKSHEET_SERVICE_ITEMS,
-                    'SHEET_ID_OUTPUT_REVIEW': SHEET_ID_OUTPUT_REVIEW,
-                    'WORKSHEET_PART_USAGE': WORKSHEET_PART_USAGE,
-                    'SHEET_ID_SERVICE_GRAB': SHEET_ID_SERVICE_GRAB,
-                    'WORKSHEET_SERVICE_GRAB': WORKSHEET_SERVICE_GRAB,
-                    'NEON_DB_CONNECTION_STRING': NEON_DB_CONNECTION_STRING,
-                    'GOOGLE_APPLICATION_CREDENTIALS': str(SERVICE_ACCOUNT_FILE) if SERVICE_ACCOUNT_FILE else '',
-                    'GDRIVE_OUTPUT_FOLDER_ID': os.getenv('GDRIVE_OUTPUT_FOLDER_ID', ''),
-                }
-                for k, v in secrets_to_inject.items():
-                    if v:
-                        env[k] = str(v)
+                # Inject secrets into subprocess env
+                # (subprocess can't access st.secrets, so we flatten ALL secrets into env vars)
+                try:
+                    # Flatten st.secrets into env vars
+                    if hasattr(st, 'secrets'):
+                        # Map [sheets] section keys to env var names
+                        sheets_key_map = {
+                            'service_items': 'SHEET_ID_SERVICE_ITEMS',
+                            'mappings': 'SHEET_ID_MAPPINGS',
+                            'part_usage': 'SHEET_ID_OUTPUT_REVIEW',
+                            'asset_list': 'SHEET_ID_ASSET_LIST',
+                        }
+                        
+                        for section_key in st.secrets:
+                            section = st.secrets[section_key]
+                            if hasattr(section, 'items'):
+                                # It's a section (dict-like)
+                                for k, v in section.items():
+                                    # Use the key_map for [sheets] section
+                                    if section_key == 'sheets' and k in sheets_key_map:
+                                        env[sheets_key_map[k]] = str(v)
+                                    else:
+                                        env[k] = str(v)
+                            else:
+                                # Top-level key
+                                env[section_key] = str(section)
+                    
+                    print(f"✅ Injected secrets into subprocess env")
+                except Exception as e:
+                    print(f"⚠️ Could not inject st.secrets: {e}")
                 
                 try:
                     # --- Step 1: Smart Repair part_usage sheet ---
