@@ -99,38 +99,13 @@ def run_location_fix():
             norm_name, loc_id = alias_map[loc_lower]
             return norm_name, loc_id, False, "EXACT_MATCH"
         
-        # 2. Pattern/Regex match
+        # 2. Pattern/Regex match (driven by master sheet 'pattern' column)
         for compiled_regex, norm_name, loc_id in pattern_list:
             if compiled_regex.search(loc_str):
                 return norm_name, loc_id, False, "PATTERN_MATCH"
         
-        # 3. Keyword-based matching (fallback)
-        norm_name = loc_str
-        
-        if any(kw in loc_lower for kw in ['grab', 'cakung']):
-            norm_name = "Grab - Cakung"  # Use master name
-        elif any(kw in loc_lower for kw in ['electrum', 'pondok indah', 'pi pool']):
-            norm_name = "Pondok Indah"
-        elif 'kembangan' in loc_lower or 'kmb' in loc_lower:
-            norm_name = "Kembangan"
-        elif 'depok' in loc_lower:
-            norm_name = "Depok"
-        elif 'bekasi' in loc_lower:
-            norm_name = "Bekasi"
-        
-        # Try lookup after normalization
-        if norm_name.lower() in alias_map:
-            resolved_name, loc_id = alias_map[norm_name.lower()]
-            return resolved_name, loc_id, False, "KEYWORD_MATCH"
-        
-        # Direct lookup in location_map
-        loc_id = location_map.get(norm_name)
-        
-        if loc_id:
-            return norm_name, loc_id, False, "KEYWORD_MATCH"
-        else:
-            # Not found
-            return norm_name, None, True, f"NOT_IN_MASTER:{original}"
+        # 3. No match found — flag for review
+        return loc_str, None, True, f"NOT_IN_MASTER:{original}"
     
     # Apply to all rows
     results = df.apply(resolve_location, axis=1)

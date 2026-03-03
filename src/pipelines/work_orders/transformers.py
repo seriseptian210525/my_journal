@@ -573,36 +573,13 @@ class ServiceDataEnricher:
                 norm_name, loc_id = alias_map[loc_lower]
                 return norm_name, loc_id, False, "EXACT_MATCH"
             
-            # 2. Pattern/Regex match
+            # 2. Pattern/Regex match (driven by master sheet 'pattern' column)
             for compiled_regex, norm_name, loc_id in pattern_list:
                 if compiled_regex.search(loc_str):
                     return norm_name, loc_id, False, "PATTERN_MATCH"
             
-            # 3. Keyword-based matching (fallback)
-            norm_name = loc_str
-            
-            if any(kw in loc_lower for kw in ['grab', 'cakung']):
-                norm_name = "Grab - Cakung"
-            elif any(kw in loc_lower for kw in ['electrum', 'pondok indah']):
-                norm_name = "Pondok Indah"
-            elif 'kembangan' in loc_lower:
-                norm_name = "Kembangan"
-            elif 'depok' in loc_lower:
-                norm_name = "Depok"
-            elif 'bekasi' in loc_lower:
-                norm_name = "Bekasi"
-            
-            # Try lookup after normalization
-            if norm_name.lower() in alias_map:
-                resolved_name, loc_id = alias_map[norm_name.lower()]
-                return resolved_name, loc_id, False, "KEYWORD_MATCH"
-            
-            loc_id = location_map.get(norm_name)
-            
-            if loc_id:
-                return norm_name, loc_id, False, "KEYWORD_MATCH"
-            else:
-                return norm_name, None, True, f"NOT_IN_MASTER:{loc_str}"
+            # 3. No match found — flag for review
+            return loc_str, None, True, f"NOT_IN_MASTER:{loc_str}"
         
         # Apply logic
         if 'service_location_name' in self.df.columns:
