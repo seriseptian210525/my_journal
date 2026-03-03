@@ -67,6 +67,19 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
         st.info("Jalankan pipeline ETL penuh untuk menarik ulang semua data Google Sheets, membersihkan data, dan me-refresh file Cloud CSV di Google Drive.")
         
         if CLOUD_DATA_AVAILABLE:
+            # Show previous refresh results (persisted across rerun)
+            if 'refresh_result' in st.session_state:
+                result = st.session_state.refresh_result
+                if result['success']:
+                    st.success(f"✅ **Cloud Data Refresh Completed!** ({result.get('timestamp', '')})")
+                else:
+                    st.error(f"❌ **Refresh Failed:** {result.get('error', 'Unknown error')}")
+                with st.expander("📋 Last Refresh Execution Logs", expanded=not result['success']):
+                    st.code(result.get('logs', 'No logs'), language='bash')
+                if st.button("🗑️ Dismiss", key="dismiss_refresh"):
+                    del st.session_state.refresh_result
+                    st.rerun()
+            
             if st.button("🔄 Refresh Cloud Data", type="secondary", use_container_width=True,
                          help="Smart Repair part_usage → Full ETL Pipeline → Refresh Dashboard"):
                 import subprocess, sys, os
@@ -80,33 +93,25 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
                 # Inject secrets into subprocess env
                 # (subprocess can't access st.secrets, so we flatten ALL secrets into env vars)
                 try:
-                    # Flatten st.secrets into env vars
                     if hasattr(st, 'secrets'):
-                        # Map [sheets] section keys to env var names
                         sheets_key_map = {
                             'service_items': 'SHEET_ID_SERVICE_ITEMS',
                             'mappings': 'SHEET_ID_MAPPINGS',
                             'part_usage': 'SHEET_ID_OUTPUT_REVIEW',
                             'asset_list': 'SHEET_ID_ASSET_LIST',
                         }
-                        
                         for section_key in st.secrets:
                             section = st.secrets[section_key]
                             if hasattr(section, 'items'):
-                                # It's a section (dict-like)
                                 for k, v in section.items():
-                                    # Use the key_map for [sheets] section
                                     if section_key == 'sheets' and k in sheets_key_map:
                                         env[sheets_key_map[k]] = str(v)
                                     else:
                                         env[k] = str(v)
                             else:
-                                # Top-level key
                                 env[section_key] = str(section)
-                    
-                    print(f"✅ Injected secrets into subprocess env")
                 except Exception as e:
-                    print(f"⚠️ Could not inject st.secrets: {e}")
+                    log_parts.append(f"⚠️ Could not inject st.secrets: {e}")
                 
                 try:
                     # --- Step 1: Smart Repair part_usage sheet ---
@@ -128,9 +133,6 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
                     bf_output = result_bf.stdout + result_bf.stderr
                     log_parts.append("=== SMART REPAIR PART USAGE ===\n" + bf_output)
                     
-                    if result_bf.returncode != 0:
-                        st.warning(f"⚠️ Smart Repair finished with warnings. Check logs for details.")
-                    
                     # --- Step 2: Run Full ETL Pipeline (fresh process) ---
                     progress.progress(30, text="⚙️ Step 2/3: Running Full ETL Pipeline (3 sheets → normalize → Drive CSV)...")
                     
@@ -143,30 +145,47 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
                     log_parts.append("\n=== ETL PIPELINE ===\n" + etl_output)
                     
                     if result_etl.returncode != 0:
-                        st.error(f"❌ Pipeline failed (exit code {result_etl.returncode}). Check logs below.")
-                        with st.expander("Show Error Logs", expanded=True):
-                            st.code("\n".join(log_parts), language='bash')
-                        st.stop()
+                        progress.progress(100, text="❌ Failed")
+                        from datetime import datetime as dt
+                        st.session_state.refresh_result = {
+                            'success': False,
+                            'error': f"Pipeline failed (exit code {result_etl.returncode})",
+                            'logs': "\n".join(log_parts),
+                            'timestamp': dt.now().strftime("%Y-%m-%d %H:%M:%S")
+                        }
+                        st.rerun()
                     
                     # --- Step 3: Clear cache + rerun ---
                     progress.progress(95, text="🧹 Step 3/3: Clearing cache & reloading...")
                     neon_service.clear_cache()
                     
                     progress.progress(100, text="✅ Done!")
-                    
-                    st.success("✅ **Cloud Data Refresh Completed Successfully!**")
-                    with st.expander("Show Execution Logs", expanded=False):
-                        st.code("\n".join(log_parts), language='bash')
-                    
+                    from datetime import datetime as dt
+                    st.session_state.refresh_result = {
+                        'success': True,
+                        'logs': "\n".join(log_parts),
+                        'timestamp': dt.now().strftime("%Y-%m-%d %H:%M:%S")
+                    }
                     st.rerun()
                         
                 except subprocess.TimeoutExpired:
-                    st.error("❌ Pipeline timed out. Try running from CLI: `python src/pipelines/neon_sync/run.py --mode full`")
+                    from datetime import datetime as dt
+                    st.session_state.refresh_result = {
+                        'success': False,
+                        'error': "Pipeline timed out (>600s). Try from CLI.",
+                        'logs': "\n".join(log_parts),
+                        'timestamp': dt.now().strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                    st.rerun()
                 except Exception as e:
-                    st.error(f"❌ Refresh failed: {str(e)}")
-                    if log_parts:
-                        with st.expander("Show Logs", expanded=True):
-                            st.code("\n".join(log_parts), language='bash')
+                    from datetime import datetime as dt
+                    st.session_state.refresh_result = {
+                        'success': False,
+                        'error': str(e),
+                        'logs': "\n".join(log_parts) if log_parts else "No logs captured",
+                        'timestamp': dt.now().strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                    st.rerun()
         else:
             st.warning("Cloud Data connection not available. Check environment credentials.")
 
