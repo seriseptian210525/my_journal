@@ -155,14 +155,14 @@ class PartUsageService:
         # 1. Forward Fill within the same plate (if history exists in this batch)
         if 'created_at' in merged.columns:
             merged['created_at_dt'] = pd.to_datetime(merged['created_at'], errors='coerce')
-            merged = merged.sort_values(['vehicle_plate', 'created_at_dt'])
+            merged = merged.sort_values([plate_col, 'created_at_dt'])
             
             fill_cols = ['delivery_date', 'customer_type', 'bike_type']
             for col in fill_cols:
                 if col in merged.columns:
                     missing_before = merged[col].isna().sum() + (merged[col] == '').sum() if merged[col].dtype == 'object' else merged[col].isna().sum()
                     if missing_before > 0:
-                        merged[col] = merged.groupby('vehicle_plate')[col].transform(lambda x: x.ffill().bfill())
+                        merged[col] = merged.groupby(plate_col)[col].transform(lambda x: x.ffill().bfill())
 
         # 2. String Fallback ('UNKNOWN') & Date Repair (using 'created_at')
         merged['customer_type'] = merged['customer_type'].replace(['', 'nan', 'None'], pd.NA).fillna('UNKNOWN')
