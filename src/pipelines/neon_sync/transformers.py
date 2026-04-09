@@ -231,15 +231,21 @@ def calculate_warranty_coverage(df, asset_df=None, mapping_df=None, skip_sequenc
     if out['created_at'].dt.tz is not None:
         out['created_at'] = out['created_at'].dt.tz_localize(None)
     
-    # --- Step 3: Calculate Bulan Ke ---
-    # Strictly handle Empty/NaT delivery_date
+    # --- Step 3: Calculate Bulan Ke (Calendar-based) ---
+    # Uses calendar month diff so anniversary dates align exactly
+    # e.g. delivery 2025-03-11 → created 2026-03-11 = bulan_ke 12, year_cycle 1
     mask_valid_dates = out['delivery_date'].notna() & out['created_at'].notna()
     
     out['bulan_ke'] = 0
     if mask_valid_dates.any():
-        out.loc[mask_valid_dates, 'bulan_ke'] = ((out.loc[mask_valid_dates, 'created_at'] - out.loc[mask_valid_dates, 'delivery_date']).dt.days / 30.44).astype(int)
-    
-    out['bulan_ke'] = out['bulan_ke'].apply(lambda x: max(0, x))  # No negative months
+        _created = out.loc[mask_valid_dates, 'created_at']
+        _delivery = out.loc[mask_valid_dates, 'delivery_date']
+        
+        # Calendar month difference
+        _month_diff = (_created.dt.year - _delivery.dt.year) * 12 + (_created.dt.month - _delivery.dt.month)
+        # Subtract 1 if day-of-month hasn't been reached yet
+        _before_day = (_created.dt.day < _delivery.dt.day).astype(int)
+        out.loc[mask_valid_dates, 'bulan_ke'] = (_month_diff - _before_day).clip(lower=0).astype(int)
     
     # --- Step 4: Calculate Year Cycle ---
     out['year_cycle'] = (out['bulan_ke'] // 12).astype(int)
