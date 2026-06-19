@@ -22,6 +22,16 @@ on:
         options:
           - full
           - incremental
+      start_date:
+        description: 'Optional backfill start date for work_orders (YYYY-MM-DD, manual only)'
+        required: false
+        default: ''
+        type: string
+      end_date:
+        description: 'Optional backfill end date for work_orders (YYYY-MM-DD, manual only)'
+        required: false
+        default: ''
+        type: string
 
   # Jadwal otomatis (cron) - GitHub uses UTC timezone
   schedule:
@@ -50,6 +60,8 @@ jobs:
       # Pipeline mode: cron uses incremental, manual uses selected mode
       PIPELINE_MODE: ${{ github.event_name == 'schedule' && 'incremental' || github.event.inputs.mode }}
       LOOKBACK_DAYS: "2"
+      BACKFILL_START_DATE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.start_date || '' }}
+      BACKFILL_END_DATE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.end_date || '' }}
       
       # Worksheet names
       WORKSHEET_FORM_SERVICE: "Service History (2024-Jun 2025)"

@@ -24,9 +24,25 @@ if __name__ == "__main__":
         choices=["full", "incremental", "recalculate"],
         help="Pipeline mode (for neon_sync): full=truncate+refresh, incremental=append new, recalculate=upsert"
     )
+    parser.add_argument(
+        "--start-date",
+        type=str,
+        default="",
+        help="Optional inclusive start date for work_orders backfill (YYYY-MM-DD)"
+    )
+    parser.add_argument(
+        "--end-date",
+        type=str,
+        default="",
+        help="Optional inclusive end date for work_orders backfill (YYYY-MM-DD)"
+    )
     args = parser.parse_args()
 
     if args.pipeline == "work_orders":
+        if args.start_date:
+            os.environ['BACKFILL_START_DATE'] = args.start_date
+        if args.end_date:
+            os.environ['BACKFILL_END_DATE'] = args.end_date
         from src.pipelines.work_orders.run import run_work_order_pipeline
         run_work_order_pipeline()
     

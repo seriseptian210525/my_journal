@@ -31,10 +31,50 @@ from src.pipelines.work_orders.complaint_cleaner import ComplaintCleaner
 # Pipeline Mode Configuration
 PIPELINE_MODE = os.getenv('PIPELINE_MODE', 'full')  # 'full' or 'incremental'
 LOOKBACK_DAYS = int(os.getenv('LOOKBACK_DAYS', '2'))  # Days to look back for incremental mode
+BACKFILL_START_DATE = os.getenv('BACKFILL_START_DATE', '').strip()
+BACKFILL_END_DATE = os.getenv('BACKFILL_END_DATE', '').strip()
+
+def _parse_date_boundary(raw_value, label, is_end=False):
+    if not raw_value:
+        return None
+
+    parsed = pd.to_datetime(raw_value, errors='coerce')
+    if pd.isna(parsed):
+        raise ValueError(f"Invalid {label}: '{raw_value}'. Use YYYY-MM-DD format.")
+
+    parsed = parsed.normalize()
+    if is_end:
+        parsed = parsed + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
+    return parsed
+
+def _build_processing_timestamp(df):
+    created_at = pd.to_datetime(df.get('created_at'), errors='coerce')
+    processing_ts = created_at.copy()
+
+    if 'completed_at' in df.columns and 'data_source' in df.columns:
+        completed_at = pd.to_datetime(df['completed_at'], errors='coerce')
+        s4_mask = df['data_source'].astype(str).eq('S4_REQUEST_SPK')
+        processing_ts.loc[s4_mask] = completed_at.loc[s4_mask].fillna(created_at.loc[s4_mask])
+
+    return processing_ts
 
 def run_work_order_pipeline():
+    effective_mode = PIPELINE_MODE.lower()
+    has_explicit_backfill = bool(BACKFILL_START_DATE or BACKFILL_END_DATE)
+
+    if has_explicit_backfill and effective_mode != 'incremental':
+        print("   Explicit backfill range detected. For safety, forcing INCREMENTAL mode.")
+        effective_mode = 'incremental'
+
+    backfill_start = _parse_date_boundary(BACKFILL_START_DATE, 'BACKFILL_START_DATE')
+    backfill_end = _parse_date_boundary(BACKFILL_END_DATE, 'BACKFILL_END_DATE', is_end=True)
+
+    if backfill_start and backfill_end and backfill_start > backfill_end:
+        raise ValueError("BACKFILL_START_DATE cannot be after BACKFILL_END_DATE.")
     print("🚀 Starting Work Order Pipeline (Modular)...")
-    print(f"   Mode: {PIPELINE_MODE.upper()}, Lookback: {LOOKBACK_DAYS} days")
+    print(f"   Mode: {effective_mode.upper()}, Lookback: {LOOKBACK_DAYS} days")
+    if has_explicit_backfill:
+        print(f"   Backfill Range: {BACKFILL_START_DATE or 'min'} -> {BACKFILL_END_DATE or 'max'}")
     
     # Suppress warnings
     warnings.filterwarnings('ignore')
@@ -113,9 +153,36 @@ def run_work_order_pipeline():
     # Merge
     merged_df = pipeline.merge_and_finalize()
     print(f"   Total rows merged: {len(merged_df)}")
-    
-    # [INCREMENTAL MODE] Filter by date if incremental
-    if PIPELINE_MODE == 'incremental' and 'created_at' in merged_df.columns:
+
+    if (effective_mode == 'incremental' or has_explicit_backfill) and 'created_at' in merged_df.columns:
+        merged_df['created_at'] = pd.to_datetime(merged_df['created_at'], errors='coerce')
+        merged_df['_processing_timestamp'] = _build_processing_timestamp(merged_df)
+
+        before_filter = len(merged_df)
+
+        if has_explicit_backfill:
+            if backfill_start is not None:
+                merged_df = merged_df[merged_df['_processing_timestamp'] >= backfill_start]
+            if backfill_end is not None:
+                merged_df = merged_df[merged_df['_processing_timestamp'] <= backfill_end]
+
+            print(
+                f"   Backfill filter: {before_filter} -> {len(merged_df)} rows "
+                f"({BACKFILL_START_DATE or 'min'} to {BACKFILL_END_DATE or 'max'})"
+            )
+        else:
+            cutoff_date = datetime.now() - timedelta(days=LOOKBACK_DAYS)
+            merged_df = merged_df[merged_df['_processing_timestamp'] >= cutoff_date]
+            print(f"   Incremental filter: {before_filter} -> {len(merged_df)} rows (last {LOOKBACK_DAYS} days)")
+
+        if merged_df.empty:
+            print("   No new data to process. Exiting.")
+            return
+
+        merged_df = merged_df.drop(columns=['_processing_timestamp'])
+     
+    # Legacy incremental filter block kept disabled for safe rollout.
+    if False:
         cutoff_date = datetime.now() - timedelta(days=LOOKBACK_DAYS)
         merged_df['created_at'] = pd.to_datetime(merged_df['created_at'], errors='coerce')
         
@@ -129,7 +196,7 @@ def run_work_order_pipeline():
     
     # [INCREMENTAL MODE] Fetch existing order_ids to avoid duplicates
     existing_order_ids = set()
-    if PIPELINE_MODE == 'incremental' and SHEET_ID_OUTPUT and WORKSHEET_OUTPUT:
+    if effective_mode == 'incremental' and SHEET_ID_OUTPUT and WORKSHEET_OUTPUT:
         print("   📋 Fetching existing order_ids from sheet...")
         try:
             existing_df = loader.load_gspread_data(SHEET_ID_OUTPUT, WORKSHEET_OUTPUT)
@@ -254,7 +321,7 @@ def run_work_order_pipeline():
     dedup_keys = ['order_id']
     
     if SHEET_ID_OUTPUT and WORKSHEET_OUTPUT:
-        if PIPELINE_MODE == 'incremental':
+        if effective_mode == 'incremental':
             loader.append_to_sheet(business_df, SHEET_ID_OUTPUT, WORKSHEET_OUTPUT, key_columns=dedup_keys)
         else:
             loader.upload_to_sheet(business_df, SHEET_ID_OUTPUT, WORKSHEET_OUTPUT)
@@ -269,7 +336,7 @@ def run_work_order_pipeline():
                 tech_df[col] = tech_df[col].replace([np.inf, -np.inf], np.nan)
                 tech_df[col] = tech_df[col].where(pd.notna(tech_df[col]), None)
         
-        if PIPELINE_MODE == 'incremental':
+        if effective_mode == 'incremental':
             loader.append_to_sheet(tech_df, SHEET_ID_OUTPUT, WORKSHEET_TECH_LOG, key_columns=dedup_keys)
         else:
             loader.upload_to_sheet(tech_df, SHEET_ID_OUTPUT, WORKSHEET_TECH_LOG)
