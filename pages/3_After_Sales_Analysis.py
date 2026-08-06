@@ -115,7 +115,7 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
                 
                 try:
                     # --- Step 1: Smart Repair part_usage sheet ---
-                    progress.progress(10, text="🔍 Step 1/3: Smart Repair part_usage sheet [customer_type, bike_type, delivery_date]...")
+                    progress.progress(10, text="🔍 Step 1/4: Smart Repair part_usage sheet [customer_type, bike_type, delivery_date]...")
                     
                     bf_script = (
                         "import sys; sys.path.insert(0, '.');"
@@ -132,9 +132,24 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
                     )
                     bf_output = result_bf.stdout + result_bf.stderr
                     log_parts.append("=== SMART REPAIR PART USAGE ===\n" + bf_output)
-                    
-                    # --- Step 2: Run Full ETL Pipeline (fresh process) ---
-                    progress.progress(30, text="⚙️ Step 2/3: Running Full ETL Pipeline (3 sheets → normalize → Drive CSV)...")
+
+                    # --- Step 2: GEL Sync (Grab → Google Sheets) ---
+                    progress.progress(30, text="🔄 Step 2/4: Syncing GEL/Grab data to Google Sheets...")
+
+                    result_gel = subprocess.run(
+                        [sys.executable, '-m', 'entrypoint.sync_gel_to_sheets'],
+                        capture_output=True, text=True, timeout=300,
+                        cwd=project_root, env=env
+                    )
+                    gel_output = result_gel.stdout + result_gel.stderr
+                    log_parts.append("\n=== GEL SYNC (Grab → GSheet) ===\n" + gel_output)
+
+                    if result_gel.returncode != 0:
+                        # GEL sync failure is non-fatal: log warning but continue ETL
+                        log_parts.append("⚠️ GEL Sync exited with errors (non-fatal). ETL will continue with existing data.")
+
+                    # --- Step 3: Run Full ETL Pipeline (fresh process) ---
+                    progress.progress(55, text="⚙️ Step 3/4: Running Full ETL Pipeline (G-Sheet → normalize → Drive CSV)...")
                     
                     result_etl = subprocess.run(
                         [sys.executable, os.path.join('src', 'pipelines', 'neon_sync', 'run.py'), '--mode', 'full'],
@@ -149,14 +164,14 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
                         from datetime import datetime as dt
                         st.session_state.refresh_result = {
                             'success': False,
-                            'error': f"Pipeline failed (exit code {result_etl.returncode})",
+                            'error': f"ETL Pipeline failed (exit code {result_etl.returncode})",
                             'logs': "\n".join(log_parts),
                             'timestamp': dt.now().strftime("%Y-%m-%d %H:%M:%S")
                         }
                         st.rerun()
                     
-                    # --- Step 3: Clear cache + rerun ---
-                    progress.progress(95, text="🧹 Step 3/3: Clearing cache & reloading...")
+                    # --- Step 4: Clear cache + rerun ---
+                    progress.progress(95, text="🧹 Step 4/4: Clearing cache & reloading...")
                     neon_service.clear_cache()
                     
                     progress.progress(100, text="✅ Done!")
