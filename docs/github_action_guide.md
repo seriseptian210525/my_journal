@@ -116,94 +116,61 @@ Buka tab **Variables** (bukan Secrets), lalu tambahkan:
 
 ### File: `.github/workflows/daily_etl.yml`
 
-Berikut konfigurasi workflow lengkap yang sudah siap digunakan:
+Workflow ini sekarang mendukung multi-job untuk efisiensi dan pemicu manual dengan parameter:
 
 ```yaml
 name: Daily ETL Pipeline
 
 on:
-  # Jadwal otomatis (cron)
-  schedule:
-    - cron: '0 0 * * *'  # Setiap hari jam 00:00 UTC (07:00 WIB)
-  
-  # Trigger manual dari GitHub UI
+  # Trigger manual dengan opsi parameter
   workflow_dispatch:
+    inputs:
+      pipeline:
+        description: 'Pipeline to run'
+        required: true
+        default: 'all'
+        type: choice
+        options: [all, work_orders, service_items, gel_sync]
+      mode:
+        description: 'incremental = append only, full = replace'
+        required: true
+        default: 'incremental'
+        type: choice
+        options: [incremental, full]
+
+  # Jadwal otomatis (UTC)
+  schedule:
+    - cron: '0 17 * * *' # Work Orders (00:00 WIB)
+    - cron: '0 18 * * *' # Service Items (01:00 WIB)
+    - cron: '0 4 * * 5'  # GEL Sync (Jumat 11:00 WIB)
 
 jobs:
-  run-etl:
-    runs-on: ubuntu-latest
-    
-    env:
-      # Non-sensitive config
-      SAVE_LOCAL_CSV: ${{ vars.SAVE_LOCAL_CSV }}
-      STRICT_COMPLAINT_CLEANING: ${{ vars.STRICT_COMPLAINT_CLEANING }}
-      
-      # Worksheet names (tidak perlu secrets)
-      WORKSHEET_FORM_SERVICE: "Service History (2024-Jun 2025)"
-      WORKSHEET_SERVICE_GRAB: "Form responses 1"
-      WORKSHEET_FORM_RESPONSES: "Form Responses 1"
-      WORKSHEET_REQUEST_SPK: "DATA 2025"
-      WORKSHEET_AFTER_REPAIR: "List After Repair"
-      WORKSHEET_CABANG_KEMBANGAN: "Repair Kmb"
-      WORKSHEET_CABANG_DEPOK: "Repair DP"
-      WORKSHEET_CABANG_BEKASI: "Repair BK"
-      WORKSHEET_ASSET: "ALL BIKE NEW"
-      WORKSHEET_MEKANIK: "mekanik list"
-      WORKSHEET_TOP_KELUHAN: "top_keluhan"
-      WORKSHEET_OUTPUT: "work_orders"
-      WORKSHEET_BAD_OUTPUT: "bad_data"
-      WORKSHEET_MAPPINGS: "Mappings"
-      WORKSHEET_SERVICE_ITEMS: "service_items"
-      
-      # Sheet IDs dari Secrets
-      SHEET_ID_FORM_SERVICE: ${{ secrets.SHEET_ID_FORM_SERVICE }}
-      SHEET_ID_SERVICE_GRAB: ${{ secrets.SHEET_ID_SERVICE_GRAB }}
-      SHEET_ID_FORM_RESPONSES: ${{ secrets.SHEET_ID_FORM_RESPONSES }}
-      SHEET_ID_REQUEST_SPK: ${{ secrets.SHEET_ID_REQUEST_SPK }}
-      SHEET_ID_AFTER_REPAIR: ${{ secrets.SHEET_ID_AFTER_REPAIR }}
-      SHEET_ID_CABANG_KEMBANGAN: ${{ secrets.SHEET_ID_CABANG_KEMBANGAN }}
-      SHEET_ID_CABANG_DEPOK: ${{ secrets.SHEET_ID_CABANG_DEPOK }}
-      SHEET_ID_CABANG_BEKASI: ${{ secrets.SHEET_ID_CABANG_BEKASI }}
-      SHEET_ID_ASSET_LIST: ${{ secrets.SHEET_ID_ASSET_LIST }}
-      SHEET_ID_MEKANIK: ${{ secrets.SHEET_ID_MEKANIK }}
-      SHEET_KAMUS_KELUHAN: ${{ secrets.SHEET_KAMUS_KELUHAN }}
-      SHEET_ID_OUTPUT: ${{ secrets.SHEET_ID_OUTPUT }}
-      SHEET_ID_SERVICE_ITEMS: ${{ secrets.SHEET_ID_SERVICE_ITEMS }}
-      SHEET_ID_MAPPINGS: ${{ secrets.SHEET_ID_MAPPINGS }}
-
+  work-orders:
+    # Berjalan sesuai jadwal 17:00 UTC atau manual 'all'/'work_orders'
+    if: github.event_name == 'schedule' && contains(github.event.schedule, '17') || ...
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-      
-      - name: Install Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-      
-      - name: Create Google Credentials File
-        run: |
-          echo '${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}' > google_credentials.json
-      
-      - name: Run Work Orders ETL Pipeline
+      # ... setup python & install deps ...
+      - name: Run Work Orders Pipeline
         run: python -m src.pipelines.work_orders.run
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: "./google_credentials.json"
-      
+
+  service-items:
+    # Berjalan sesuai jadwal 18:00 UTC atau manual 'all'/'service_items'
+    steps:
       - name: Run Service Items Pipeline
         run: python -m src.pipelines.service_items.run
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: "./google_credentials.json"
-      
-      - name: Cleanup Credentials
-        if: always()
-        run: rm -f google_credentials.json
+
+  gel-sync:
+    # Berjalan sesuai jadwal Jumat atau manual 'all'/'gel_sync'
+    steps:
+      - name: Run GEL Sync to Google Sheets
+        run: python -m entrypoint.sync_gel_to_sheets
 ```
+
+### Fitur Baru dalam Workflow
+
+1.  **Job Separation**: Setiap pipeline (`work-orders`, `service_items`, `gel-sync`) dipisahkan menjadi job mandiri. Jika salah satu gagal, job lainnya tetap bisa berjalan atau ditinjau secara terpisah.
+2.  **Manual Input**: Anda bisa memilih mode `full` saat menjalankan manual jika ingin membersihkan seluruh data di Google Sheets dan mengisinya kembali dari awal.
+3.  **Selective Execution**: Melalui pemicu manual, Anda bisa memilih hanya menjalankan satu pipeline spesifik (misal: hanya `gel_sync`) tanpa harus menjalankan semuanya.
 
 ### Penjelasan Steps
 
