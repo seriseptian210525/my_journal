@@ -246,7 +246,6 @@ def calculate_warranty_coverage(df, asset_df=None, mapping_df=None, skip_sequenc
         # Subtract 1 if day-of-month hasn't been reached yet
         _before_day = (_created.dt.day < _delivery.dt.day).astype(int)
         out.loc[mask_valid_dates, 'bulan_ke'] = (_month_diff - _before_day).clip(lower=0).astype(int)
-    
     # --- Step 4: Calculate Year Cycle ---
     out['year_cycle'] = (out['bulan_ke'] // 12).astype(int)
     
@@ -258,6 +257,7 @@ def calculate_warranty_coverage(df, asset_df=None, mapping_df=None, skip_sequenc
     out['covered_for'] = ''
     out['limit_per_year'] = 0
     out['periode_garansi'] = 0  # NEW: Warranty period in months
+    out['kilometer_garansi'] = 0 # NEW: Warranty limit in km
     
     if mapping_df is not None and not mapping_df.empty:
         mapping_clean = mapping_df.copy()
@@ -283,6 +283,10 @@ def calculate_warranty_coverage(df, asset_df=None, mapping_df=None, skip_sequenc
             if 'Periode Garansi' in mapping_clean.columns:
                 mapping_clean['_periode_garansi'] = pd.to_numeric(mapping_clean['Periode Garansi'], errors='coerce').fillna(0).astype(int)
                 warranty_cols.append('_periode_garansi')
+            # NEW: Kilometer Garansi
+            if 'Kilometer Garansi' in mapping_clean.columns:
+                mapping_clean['_kilometer_garansi'] = pd.to_numeric(mapping_clean['Kilometer Garansi'], errors='coerce').fillna(0).astype(int)
+                warranty_cols.append('_kilometer_garansi')
             
             # Deduplicate
             mapping_clean = mapping_clean.drop_duplicates(subset=['join_sku'])
@@ -299,9 +303,11 @@ def calculate_warranty_coverage(df, asset_df=None, mapping_df=None, skip_sequenc
                 out['limit_per_year'] = out['_limit_per_year'].fillna(0).astype(int)
             if '_periode_garansi' in out.columns:
                 out['periode_garansi'] = out['_periode_garansi'].fillna(0).astype(int)
+            if '_kilometer_garansi' in out.columns:
+                out['kilometer_garansi'] = out['_kilometer_garansi'].fillna(0).astype(int)
             
             # Cleanup
-            out = out.drop(columns=['join_sku', '_warranty_type', '_covered_for', '_limit_per_year', '_periode_garansi'], errors='ignore')
+            out = out.drop(columns=['join_sku', '_warranty_type', '_covered_for', '_limit_per_year', '_periode_garansi', '_kilometer_garansi'], errors='ignore')
     
     # --- Step 6: Calculate Pergantian Ke (Conditionally Skipped) ---
     if not skip_sequence_calc:
@@ -324,9 +330,9 @@ def calculate_warranty_coverage(df, asset_df=None, mapping_df=None, skip_sequenc
         Decision tree:
           1. No delivery_date → INVALID_WARRANTY
           2. covered_for mismatch → NOT_COVERED
-          3. warranty_type == PACKAGE_SERVICE → check limit & period → PACKAGE_SERVICE or NOT_COVERED
-          4. warranty_type == WARRANT → check period → WARRANT or NOT_COVERED
-          5. warranty_type == INSURANCE, WARRANT → within period? WARRANT : INSURANCE
+          3. warranty_type == PACKAGE_SERVICE → check limit & period & km → PACKAGE_SERVICE or NOT_COVERED
+          4. warranty_type == WARRANT → check period & km → WARRANT or NOT_COVERED
+          5. warranty_type == INSURANCE, WARRANT → within period & km? WARRANT : INSURANCE
           6. warranty_type == INSURANCE → INSURANCE
           7. Else → NOT_COVERED
         """
@@ -360,26 +366,34 @@ def calculate_warranty_coverage(df, asset_df=None, mapping_df=None, skip_sequenc
         periode_garansi = row.get('periode_garansi', 0)
         limit_per_year = row.get('limit_per_year', 0)
         pergantian_ke_yearly = row.get('pergantian_ke_yearly', 1)
-        within_period = (periode_garansi <= 0) or (bulan_ke <= periode_garansi)
         
-        # 3. PACKAGE_SERVICE: check period + limit
+        current_odometer = row.get('odometer', 0)
+        kilometer_garansi = row.get('kilometer_garansi', 0)
+        
+        within_period = (periode_garansi <= 0) or (bulan_ke <= periode_garansi)
+        within_km = (kilometer_garansi <= 0) or (current_odometer <= kilometer_garansi)
+        
+        # Condition: MUST satisfy both constraints (if they are defined > 0)
+        within_warranty = within_period and within_km
+        
+        # 3. PACKAGE_SERVICE: check limit + warranty status
         if wt == 'PACKAGE_SERVICE':
-            if not within_period:
+            if not within_warranty:
                 return 'NOT_COVERED'
             if limit_per_year > 0 and pergantian_ke_yearly > limit_per_year:
                 return 'NOT_COVERED'
             return 'PACKAGE_SERVICE'
         
-        # 4. WARRANT: check period only
+        # 4. WARRANT: check warranty status only
         if wt == 'WARRANT':
-            if within_period:
+            if within_warranty:
                 return 'WARRANT'
             else:
                 return 'NOT_COVERED'
         
         # 5. INSURANCE, WARRANT: conditional split
         if wt == 'INSURANCE, WARRANT' or wt == 'INSURANCE,WARRANT':
-            if within_period:
+            if within_warranty:
                 return 'WARRANT'
             else:
                 return 'INSURANCE'
