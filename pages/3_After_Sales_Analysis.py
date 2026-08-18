@@ -132,24 +132,9 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
                     )
                     bf_output = result_bf.stdout + result_bf.stderr
                     log_parts.append("=== SMART REPAIR PART USAGE ===\n" + bf_output)
-
-                    # --- Step 2: GEL Sync (Grab → Google Sheets) ---
-                    progress.progress(30, text="🔄 Step 2/4: Syncing GEL/Grab data to Google Sheets...")
-
-                    result_gel = subprocess.run(
-                        [sys.executable, '-m', 'entrypoint.sync_gel_to_sheets'],
-                        capture_output=True, text=True, timeout=300,
-                        cwd=project_root, env=env
-                    )
-                    gel_output = result_gel.stdout + result_gel.stderr
-                    log_parts.append("\n=== GEL SYNC (Grab → GSheet) ===\n" + gel_output)
-
-                    if result_gel.returncode != 0:
-                        # GEL sync failure is non-fatal: log warning but continue ETL
-                        log_parts.append("⚠️ GEL Sync exited with errors (non-fatal). ETL will continue with existing data.")
-
-                    # --- Step 3: Run Full ETL Pipeline (fresh process) ---
-                    progress.progress(55, text="⚙️ Step 3/4: Running Full ETL Pipeline (G-Sheet → normalize → Drive CSV)...")
+                    
+                    # --- Step 2: Run Full ETL Pipeline (fresh process) ---
+                    progress.progress(30, text="⚙️ Step 2/4: Running Full ETL Pipeline (G-Sheet → normalize → Drive CSV)...")
                     
                     result_etl = subprocess.run(
                         [sys.executable, os.path.join('src', 'pipelines', 'neon_sync', 'run.py'), '--mode', 'full'],
@@ -169,6 +154,21 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
                             'timestamp': dt.now().strftime("%Y-%m-%d %H:%M:%S")
                         }
                         st.rerun()
+
+                    # --- Step 3: GEL Sync (Grab → Google Sheets) ---
+                    progress.progress(70, text="🔄 Step 3/4: Syncing GEL/Grab data to Google Sheets...")
+
+                    result_gel = subprocess.run(
+                        [sys.executable, '-m', 'entrypoint.sync_gel_to_sheets'],
+                        capture_output=True, text=True, timeout=300,
+                        cwd=project_root, env=env
+                    )
+                    gel_output = result_gel.stdout + result_gel.stderr
+                    log_parts.append("\n=== GEL SYNC (Drive CSV → GSheet) ===\n" + gel_output)
+
+                    if result_gel.returncode != 0:
+                        # GEL sync failure is non-fatal: log warning but continue ETL
+                        log_parts.append("⚠️ GEL Sync exited with errors (non-fatal). ETL will continue with existing data.")
                     
                     # --- Step 4: Clear cache + rerun ---
                     progress.progress(95, text="🧹 Step 4/4: Clearing cache & reloading...")
