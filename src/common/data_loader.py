@@ -486,6 +486,50 @@ class DataLoader:
             print(f"❌ Error appending to {worksheet_name}: {e}")
             raise e
     
+    def sort_sheet(self, sheet_id, worksheet_name, sort_column_name, ascending=True):
+        """
+        Sorts a Google Sheet by a specific column, preserving the header row.
+        Uses batch_update to ensure robustness even with many columns.
+        """
+        try:
+            print(f"🔄 Auto-sorting {worksheet_name} by '{sort_column_name}'...")
+            sheet = self.client.open_by_key(sheet_id)
+            worksheet = sheet.worksheet(worksheet_name)
+            
+            # Get headers to find the column index
+            headers = worksheet.row_values(1)
+            if sort_column_name not in headers:
+                print(f"   ⚠️ Column '{sort_column_name}' not found. Skipping sort.")
+                return
+                
+            col_idx = headers.index(sort_column_name)
+            
+            body = {
+                "requests": [
+                    {
+                        "sortRange": {
+                            "range": {
+                                "sheetId": worksheet.id,
+                                "startRowIndex": 1,  # Skip header row (0-indexed)
+                            },
+                            "sortSpecs": [
+                                {
+                                    "dimensionIndex": col_idx,
+                                    "sortOrder": "ASCENDING" if ascending else "DESCENDING"
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+            
+            sheet.batch_update(body)
+            print(f"✅ Successfully sorted {worksheet_name} by {sort_column_name}.")
+            
+        except Exception as e:
+            print(f"❌ Error sorting {worksheet_name}: {e}")
+            raise e
+    
     def _prepare_df_for_upload(self, df):
         """
         Internal function to clean and format DataFrame before upload.

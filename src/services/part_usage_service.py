@@ -18,8 +18,8 @@ class PartUsageService:
         self.sheet_id = SHEET_ID_OUTPUT_REVIEW
         self.worksheet_name = WORKSHEET_PART_USAGE
         
-        # Deduplication key based on user request (order_number)
-        self.deduplication_keys = ['order_number']
+        # Deduplication key based on user request (order_number + sku to allow multiple items per order)
+        self.deduplication_keys = ['order_number', 'sku']
 
     def consolidate_local_files(self, source_dir: str = "output/part_usage") -> pd.DataFrame:
         """
@@ -216,6 +216,16 @@ class PartUsageService:
             worksheet_name=self.worksheet_name,
             key_columns=self.deduplication_keys
         )
+        
+        # Auto-sort the sheet by created_at after appending
+        try:
+            self.data_loader.sort_sheet(
+                sheet_id=self.sheet_id, 
+                worksheet_name=self.worksheet_name, 
+                sort_column_name='created_at'
+            )
+        except Exception as e:
+            print(f"⚠️ Failed to auto-sort sheet: {e}")
 
     def backfill_part_usage_sheet(self) -> dict:
         """
