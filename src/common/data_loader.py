@@ -466,8 +466,14 @@ class DataLoader:
             
             print(f"   Adding {len(new_rows)} new rows (skipped {skipped} duplicates)...")
             
-            # Calculate next row position
-            next_row = len(existing_data) + 1
+            # Calculate next row position by finding the actual last row with data
+            actual_last_row_index = len(existing_data)
+            for i in range(len(existing_data)-1, -1, -1):
+                if any(str(val).strip() for val in existing_data[i]):
+                    actual_last_row_index = i + 1
+                    break
+            
+            next_row = actual_last_row_index + 1
             
             # Check if we need to expand the sheet
             required_rows = next_row + len(new_rows) - 1
@@ -498,11 +504,18 @@ class DataLoader:
             
             # Get headers to find the column index
             headers = worksheet.row_values(1)
-            if sort_column_name not in headers:
-                print(f"   ⚠️ Column '{sort_column_name}' not found. Skipping sort.")
+            
+            # Find column index case-insensitively and ignoring whitespace
+            target = sort_column_name.strip().lower()
+            col_idx = -1
+            for i, h in enumerate(headers):
+                if h.strip().lower() == target:
+                    col_idx = i
+                    break
+            
+            if col_idx == -1:
+                print(f"   ⚠️ Column '{sort_column_name}' not found in headers {headers[:5]}... Skipping sort.")
                 return
-                
-            col_idx = headers.index(sort_column_name)
             
             body = {
                 "requests": [
