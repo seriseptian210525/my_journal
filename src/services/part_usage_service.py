@@ -18,10 +18,10 @@ class PartUsageService:
         self.sheet_id = SHEET_ID_OUTPUT_REVIEW
         self.worksheet_name = WORKSHEET_PART_USAGE
         
-        # Deduplication key based on user request (order_number + sku to allow multiple items per order)
-        # Added 'created_at' because order_number is often empty in Smart Repair CSVs, 
-        # which caused new rows on different days to be falsely rejected as duplicates.
-        self.deduplication_keys = ['created_at', 'order_number', 'sku']
+        # Deduplication: order_number + sku
+        # Purpose: prevent the same CSV from being uploaded/appended twice.
+        # One order_number can have multiple SKUs → each unique combo = 1 row.
+        self.deduplication_keys = ['order_number', 'sku']
 
     def consolidate_local_files(self, source_dir: str = "output/part_usage") -> pd.DataFrame:
         """
@@ -196,17 +196,10 @@ class PartUsageService:
             print("⚠️ Dataframe is empty, skipping sync.")
             return
 
-        # Normalize common timestamp columns to 'created_at' if missing
-        if 'created_at' not in df.columns:
-            for col in ['Timestamp', 'timestamp', 'Date', 'date', 'Tanggal', 'tanggal']:
-                if col in df.columns:
-                    df = df.rename(columns={col: 'created_at'})
-                    break
-
-        # Ensure required columns exist for deduplication
+        # Ensure required columns exist for deduplication (warn but don't crash)
         missing_keys = [k for k in self.deduplication_keys if k not in df.columns]
         if missing_keys:
-            raise ValueError(f"❌ Missing deduplication keys in data: {missing_keys}")
+            print(f"⚠️ Missing deduplication columns {missing_keys} — dedup will use available keys only.")
         
         # ENRICHMENT: Add customer_type, bike_type, delivery_date from Asset List
         df = self._enrich_from_asset_list(df)
