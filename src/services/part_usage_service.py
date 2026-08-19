@@ -19,7 +19,9 @@ class PartUsageService:
         self.worksheet_name = WORKSHEET_PART_USAGE
         
         # Deduplication key based on user request (order_number + sku to allow multiple items per order)
-        self.deduplication_keys = ['order_number', 'sku']
+        # Added 'created_at' because order_number is often empty in Smart Repair CSVs, 
+        # which caused new rows on different days to be falsely rejected as duplicates.
+        self.deduplication_keys = ['created_at', 'order_number', 'sku']
 
     def consolidate_local_files(self, source_dir: str = "output/part_usage") -> pd.DataFrame:
         """
@@ -193,6 +195,13 @@ class PartUsageService:
         if df.empty:
             print("⚠️ Dataframe is empty, skipping sync.")
             return
+
+        # Normalize common timestamp columns to 'created_at' if missing
+        if 'created_at' not in df.columns:
+            for col in ['Timestamp', 'timestamp', 'Date', 'date', 'Tanggal', 'tanggal']:
+                if col in df.columns:
+                    df = df.rename(columns={col: 'created_at'})
+                    break
 
         # Ensure required columns exist for deduplication
         missing_keys = [k for k in self.deduplication_keys if k not in df.columns]
