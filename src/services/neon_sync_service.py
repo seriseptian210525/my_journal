@@ -658,7 +658,8 @@ class NeonSyncService:
                     locs.str.contains('pondok indah', na=False) |
                     locs.str.contains('kembangan', na=False) |
                     locs.str.contains('depok', na=False) |
-                    locs.str.contains('bekasi', na=False)
+                    locs.str.contains('bekasi', na=False) |
+                    locs.str.contains('kemayoran', na=False)
                 ]
             elif cat == 'Official Partner':
                 filtered = filtered[
@@ -666,7 +667,8 @@ class NeonSyncService:
                     ~locs.str.contains('pondok indah', na=False) &
                     ~locs.str.contains('kembangan', na=False) &
                     ~locs.str.contains('depok', na=False) &
-                    ~locs.str.contains('bekasi', na=False)
+                    ~locs.str.contains('bekasi', na=False) &
+                    ~locs.str.contains('kemayoran', na=False)
                 ]
                 
         if filters.get('exclude_skus'):
