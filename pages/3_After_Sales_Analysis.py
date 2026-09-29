@@ -72,6 +72,8 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
                 result = st.session_state.refresh_result
                 if result['success']:
                     st.success(f"✅ **Cloud Data Refresh Completed!** ({result.get('timestamp', '')})")
+                    if result.get('warning'):
+                        st.warning(f"⚠️ {result['warning']}")
                 else:
                     st.error(f"❌ **Refresh Failed:** {result.get('error', 'Unknown error')}")
                 with st.expander("📋 Last Refresh Execution Logs", expanded=not result['success']):
@@ -90,6 +92,7 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
                 env['PYTHONIOENCODING'] = 'utf-8'
                 env['PYTHONPATH'] = project_root
                 etl_timeout_seconds = int(env.get('ETL_TIMEOUT_SECONDS', '1200'))
+                gel_timeout_seconds = int(env.get('GEL_SYNC_TIMEOUT_SECONDS', '1200'))
                 refresh_step = 'Smart Repair'
                 
                 # Inject secrets into subprocess env
@@ -162,17 +165,30 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
                     progress.progress(70, text="🔄 Step 3/4: Syncing GEL/Grab data to Google Sheets...")
 
                     refresh_step = 'GEL Sync'
-                    result_gel = subprocess.run(
-                        [sys.executable, '-m', 'entrypoint.sync_gel_to_sheets'],
-                        capture_output=True, text=True, timeout=300,
-                        cwd=project_root, env=env
-                    )
-                    gel_output = result_gel.stdout + result_gel.stderr
-                    log_parts.append("\n=== GEL SYNC (Drive CSV → GSheet) ===\n" + gel_output)
+                    gel_warning = None
+                    try:
+                        result_gel = subprocess.run(
+                            [sys.executable, '-m', 'entrypoint.sync_gel_to_sheets'],
+                            capture_output=True, text=True, timeout=gel_timeout_seconds,
+                            cwd=project_root, env=env
+                        )
+                        gel_output = result_gel.stdout + result_gel.stderr
+                        log_parts.append("\n=== GEL SYNC (Drive CSV → GSheet) ===\n" + gel_output)
 
-                    if result_gel.returncode != 0:
-                        # GEL sync failure is non-fatal: log warning but continue ETL
-                        log_parts.append("⚠️ GEL Sync exited with errors (non-fatal). ETL will continue with existing data.")
+                        if result_gel.returncode != 0:
+                            gel_warning = "GEL Sync exited with errors; dashboard data tetap berhasil diperbarui."
+                    except subprocess.TimeoutExpired as gel_timeout:
+                        timed_out_output = (gel_timeout.stdout or '') + (gel_timeout.stderr or '')
+                        if isinstance(timed_out_output, bytes):
+                            timed_out_output = timed_out_output.decode('utf-8', errors='replace')
+                        log_parts.append("\n=== GEL SYNC (TIMEOUT) ===\n" + timed_out_output)
+                        gel_warning = (
+                            f"GEL Sync masih belum selesai setelah {gel_timeout_seconds}s; "
+                            "dashboard data tetap berhasil diperbarui."
+                        )
+
+                    if gel_warning:
+                        log_parts.append(f"⚠️ {gel_warning}")
                     
                     # --- Step 4: Clear cache + rerun ---
                     progress.progress(95, text="🧹 Step 4/4: Clearing cache & reloading...")
@@ -183,7 +199,8 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
                     st.session_state.refresh_result = {
                         'success': True,
                         'logs': "\n".join(log_parts),
-                        'timestamp': dt.now().strftime("%Y-%m-%d %H:%M:%S")
+                        'timestamp': dt.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        'warning': gel_warning,
                     }
                     st.rerun()
                         

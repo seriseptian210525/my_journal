@@ -327,8 +327,11 @@ class DataLoader:
             # Keep each request small enough for Google Sheets' payload and
             # processing limits.  A row-count-only limit is unsafe because a
             # wide worksheet can still create a multi-megabyte request.
-            max_cells_per_batch = 5_000
-            batch_size = max(1, min(500, max_cells_per_batch // max(1, len(headers))))
+            # 20k cells is comfortably below Google's typical ~2 MB payload
+            # guidance for normal Sheet values, while avoiding hundreds of
+            # tiny requests for a wide GEL export.
+            max_cells_per_batch = 20_000
+            batch_size = max(1, min(1_000, max_cells_per_batch // max(1, len(headers))))
             total_rows = len(rows)
 
             total_batches = max(1, math.ceil(total_rows / batch_size))
@@ -516,8 +519,8 @@ class DataLoader:
             
             # Append in bounded, retryable ranges. Retrying a fixed range is
             # idempotent and cannot duplicate rows after an uncertain response.
-            max_cells_per_batch = 5_000
-            batch_size = max(1, min(500, max_cells_per_batch // max(1, len(existing_headers))))
+            max_cells_per_batch = 20_000
+            batch_size = max(1, min(1_000, max_cells_per_batch // max(1, len(existing_headers))))
             total_batches = math.ceil(len(new_rows) / batch_size)
             for batch_number, start_idx in enumerate(range(0, len(new_rows), batch_size), start=1):
                 batch = new_rows[start_idx:start_idx + batch_size]
