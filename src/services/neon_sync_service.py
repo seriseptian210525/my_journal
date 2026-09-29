@@ -14,7 +14,6 @@ current_file = Path(__file__).resolve()
 project_root = current_file.parent.parent.parent
 sys.path.append(str(project_root))
 
-from src.pipelines.neon_sync.loader import NeonLoader
 from src.pipelines.neon_sync.transformers import (
     standardize_service_items,
     standardize_part_usage,
@@ -33,12 +32,13 @@ from src.common.config import (
 
 class NeonSyncService:
     """
-    Service for syncing data to Neon from Streamlit UI.
-    Supports incremental sync with smart Pergantian Ke calculation.
+    Google Drive CSV data service for the Streamlit UI.
+
+    The dashboard no longer connects to Neon/PostgreSQL.  Database-oriented
+    methods below are legacy utilities and are not initialized by this service.
     """
     
     def __init__(self):
-        self.loader = NeonLoader()
         self._data_loader = None  # Lazy load
         self._cached_df = None # RAM cache for the drive export
         self.gdrive_folder_id = os.environ.get("GDRIVE_OUTPUT_FOLDER_ID", "1lLb2vjbsccIMvL6LCFdvPxYwroIkMr2S")

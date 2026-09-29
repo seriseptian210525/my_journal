@@ -19,8 +19,8 @@ st.caption("Single Source of Truth - Cloud Data via Google Drive")
 try:
     from src.services.part_usage_service import PartUsageService
     from src.services.neon_sync_service import NeonSyncService
-    # Keep the backend object as neon_service structurally, 
-    # but logically it pulls from Drive Cloud Data now
+    # Retain the existing service name for compatibility; it reads the Drive
+    # CSV and does not initialize a PostgreSQL connection.
     neon_service = NeonSyncService()
     CLOUD_DATA_AVAILABLE = True
 except Exception as e:
@@ -552,8 +552,11 @@ st.markdown("---")
 
 with st.expander("🎯 Prime Input Queue", expanded=False):
     st.caption("Data yang perlu diinput manual: **Internal Repair** + **GEL** + **NOT_COVERED**")
-    
-    if CLOUD_DATA_AVAILABLE:
+    st.info("Pelacakan status Prime dinonaktifkan karena sebelumnya disimpan di PostgreSQL. Data antrean tetap tersedia melalui Service History.")
+
+    # This legacy editor persists checkbox states to PostgreSQL. Keep it out
+    # of the running app until its storage is moved to Google Sheets/Drive.
+    if False:
         try:
             from src.services.prime_tracking_service import PrimeTrackingService
             from src.common.config import NEON_DB_CONNECTION_STRING

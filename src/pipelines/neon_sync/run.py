@@ -9,7 +9,6 @@ current_file = Path(__file__).resolve()
 project_root = current_file.parent.parent.parent.parent
 sys.path.append(str(project_root))
 
-from src.pipelines.neon_sync.loader import NeonLoader
 from src.pipelines.neon_sync.transformers import (
     standardize_service_items, 
     standardize_part_usage,
@@ -33,15 +32,17 @@ GDRIVE_OUTPUT_FOLDER_ID = os.environ.get("GDRIVE_OUTPUT_FOLDER_ID", "1lLb2vjbscc
 
 def run_pipeline():
     """
-    Main Neon Sync Pipeline with Warranty Recalculation.
+    Google Sheets-to-Drive CSV refresh pipeline with warranty recalculation.
     
-    Modes:
-    - full: Truncate + Full refresh with warranty recalculation
-    - incremental: Append new data only (with warranty calc)
-    - recalculate: Re-calculate warranty for existing data (upsert)
+    The Drive export is rebuilt in full on every run.
     """
-    # Read Pipeline Mode from Environment (default: full)
+    # The Google Drive CSV is replaced on every refresh, so always rebuild it
+    # from the complete Google Sheets source.  Incremental mode previously
+    # depended on PostgreSQL to determine the last sync timestamp.
     pipeline_mode = os.getenv('PIPELINE_MODE', 'full').lower()
+    if pipeline_mode != 'full':
+        print("ℹ️ Incremental mode is unavailable without PostgreSQL; running a full Drive refresh.")
+        pipeline_mode = 'full'
     
     print(f"🚀 Starting Neon Sync Pipeline (Mode: {pipeline_mode.upper()})...")
     
@@ -82,17 +83,8 @@ def run_pipeline():
     if asset_df.empty:
         raise RuntimeError("❌ ABORTED: Asset List DataFrame is empty (possible Google API error). Re-run pipeline.")
     
-    # --- INCREMENTAL MODE: Get Max Date from Neon ---
+    # Full refresh: no database is used as a synchronization checkpoint.
     max_date_filter = None
-    if pipeline_mode == 'incremental':
-        print("\n🔍 Incremental Mode: Checking last sync date...")
-        max_date = loader.get_max_created_at()
-        if max_date:
-            max_date_filter = pd.to_datetime(max_date).tz_localize(None)
-            print(f"   Last sync: {max_date_filter}")
-        else:
-            print("   No existing data in Neon. Running as Full Refresh.")
-            pipeline_mode = 'full'  # Fallback to full if empty
     
     # --- 1. SERVICE ITEMS (from GSheet) ---
     print("\n📦 Processing: Service Items...")

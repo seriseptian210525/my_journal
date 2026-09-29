@@ -11,10 +11,6 @@ google-api-python-client>=2.100.0
 python-dotenv>=1.0.0
 PyYAML>=6.0.1
 
-# Database
-psycopg2-binary>=2.9.9
-sqlalchemy>=2.0.0
-
 # Fuzzy Matching
 rapidfuzz>=3.0.0
 fuzzywuzzy>=0.18.0
