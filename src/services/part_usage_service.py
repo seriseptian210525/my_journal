@@ -404,12 +404,20 @@ class PartUsageService:
                         stats[col] += 1
             
             if updates:
-                # Batch update in chunks of 5000
-                chunk_size = 5000
+                # Small batches avoid Sheets API payload limits. Each cell list
+                # targets fixed coordinates, so retrying it is safe.
+                chunk_size = 500
+                total_batches = (len(updates) + chunk_size - 1) // chunk_size
                 for i in range(0, len(updates), chunk_size):
                     chunk = updates[i:i+chunk_size]
-                    worksheet.update_cells(chunk)
-                    print(f"   ✅ Batch {i//chunk_size + 1}: Updated {len(chunk)} cells")
+                    batch_number = i // chunk_size + 1
+                    self.data_loader._retry_google_request(
+                        lambda chunk=chunk: worksheet.update_cells(chunk),
+                        f"Backfill batch {batch_number}/{total_batches}",
+                    )
+                    print(f"   ✅ Batch {batch_number}/{total_batches}: Updated {len(chunk)} cells")
+                    if batch_number < total_batches:
+                        time.sleep(0.25)
             
             print(f"   ✅ Backfill complete: customer_type={stats['customer_type']}, bike_type={stats['bike_type']}, delivery_date={stats['delivery_date']}")
             

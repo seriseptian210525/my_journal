@@ -89,6 +89,8 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
                 env = os.environ.copy()
                 env['PYTHONIOENCODING'] = 'utf-8'
                 env['PYTHONPATH'] = project_root
+                etl_timeout_seconds = int(env.get('ETL_TIMEOUT_SECONDS', '1200'))
+                refresh_step = 'Smart Repair'
                 
                 # Inject secrets into subprocess env
                 # (subprocess can't access st.secrets, so we flatten ALL secrets into env vars)
@@ -136,9 +138,10 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
                     # --- Step 2: Run Full ETL Pipeline (fresh process) ---
                     progress.progress(30, text="⚙️ Step 2/4: Running Full ETL Pipeline (G-Sheet → normalize → Drive CSV)...")
                     
+                    refresh_step = 'ETL Google Sheets → Drive CSV'
                     result_etl = subprocess.run(
                         [sys.executable, os.path.join('src', 'pipelines', 'neon_sync', 'run.py'), '--mode', 'full'],
-                        capture_output=True, text=True, timeout=600,
+                        capture_output=True, text=True, timeout=etl_timeout_seconds,
                         cwd=project_root, env=env
                     )
                     etl_output = result_etl.stdout + result_etl.stderr
@@ -158,6 +161,7 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
                     # --- Step 3: GEL Sync (Grab → Google Sheets) ---
                     progress.progress(70, text="🔄 Step 3/4: Syncing GEL/Grab data to Google Sheets...")
 
+                    refresh_step = 'GEL Sync'
                     result_gel = subprocess.run(
                         [sys.executable, '-m', 'entrypoint.sync_gel_to_sheets'],
                         capture_output=True, text=True, timeout=300,
@@ -187,7 +191,7 @@ with st.expander("📤 Upload & Sync Data", expanded=False):
                     from datetime import datetime as dt
                     st.session_state.refresh_result = {
                         'success': False,
-                        'error': "Pipeline timed out (>600s). Try from CLI.",
+                        'error': f"{refresh_step} timed out after {etl_timeout_seconds if refresh_step.startswith('ETL') else 300}s.",
                         'logs': "\n".join(log_parts),
                         'timestamp': dt.now().strftime("%Y-%m-%d %H:%M:%S")
                     }

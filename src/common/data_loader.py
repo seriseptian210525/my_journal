@@ -1,6 +1,8 @@
 import gspread
 import pandas as pd
 import os
+import random
+import time
 from .config import SERVICE_ACCOUNT_FILE
 
 class DataLoader:
@@ -12,6 +14,22 @@ class DataLoader:
         self.client = None
         self.drive_service = None
         self._connect()
+
+    @staticmethod
+    def _retry_google_request(action, description, attempts=5):
+        """Run an idempotent Google API request with bounded exponential backoff."""
+        for attempt in range(1, attempts + 1):
+            try:
+                return action()
+            except Exception as exc:
+                if attempt == attempts:
+                    raise
+                delay = min(2 ** (attempt - 1), 20) + random.uniform(0, 0.5)
+                print(
+                    f"   ⚠️ {description} failed (attempt {attempt}/{attempts}): {exc}. "
+                    f"Retrying in {delay:.1f}s..."
+                )
+                time.sleep(delay)
 
     def _get_drive_service(self, creds_dict=None):
         """Initializes Google Drive API service."""
@@ -76,9 +94,15 @@ class DataLoader:
         Loads data from a specific Google Sheet and Worksheet.
         """
         try:
-            sheet = self.client.open_by_key(sheet_id)
-            worksheet = sheet.worksheet(worksheet_name)
-            data = worksheet.get_all_values()
+            def fetch_values():
+                sheet = self.client.open_by_key(sheet_id)
+                worksheet = sheet.worksheet(worksheet_name)
+                return worksheet.get_all_values()
+
+            data = self._retry_google_request(
+                fetch_values,
+                f"Read worksheet '{worksheet_name}'",
+            )
             
             if not data:
                 print(f"⚠️ Warning: Worksheet '{worksheet_name}' is empty.")
@@ -126,10 +150,13 @@ class DataLoader:
             
             # Check if file exists in folder (include supportsAllDrives=True for Shared Drives)
             query = f"name='{filename}' and '{folder_id}' in parents and trashed=false"
-            results = self.drive_service.files().list(
-                q=query, spaces='drive', fields='files(id, name)',
-                includeItemsFromAllDrives=True, supportsAllDrives=True
-            ).execute()
+            results = self._retry_google_request(
+                lambda: self.drive_service.files().list(
+                    q=query, spaces='drive', fields='files(id, name)',
+                    includeItemsFromAllDrives=True, supportsAllDrives=True
+                ).execute(num_retries=3),
+                "Find existing Drive CSV",
+            )
             items = results.get('files', [])
             
             media = MediaIoBaseUpload(io.BytesIO(csv_buffer.getvalue().encode('utf-8')), mimetype='text/csv', resumable=True)
@@ -138,11 +165,14 @@ class DataLoader:
                 # Update existing file
                 file_id = items[0]['id']
                 print(f"   🔄 Updating existing file '{filename}' (ID: {file_id}) in Drive...")
-                response = self.drive_service.files().update(
-                    fileId=file_id,
-                    media_body=media,
-                    supportsAllDrives=True
-                ).execute()
+                response = self._retry_google_request(
+                    lambda: self.drive_service.files().update(
+                        fileId=file_id,
+                        media_body=media,
+                        supportsAllDrives=True
+                    ).execute(num_retries=3),
+                    "Update Drive CSV",
+                )
             else:
                 # Create new file
                 print(f"   ➕ Creating new file '{filename}' in Drive folder...")
@@ -151,12 +181,15 @@ class DataLoader:
                     'parents': [folder_id],
                     'mimeType': 'text/csv'
                 }
-                response = self.drive_service.files().create(
-                    body=file_metadata,
-                    media_body=media,
-                    fields='id',
-                    supportsAllDrives=True
-                ).execute()
+                response = self._retry_google_request(
+                    lambda: self.drive_service.files().create(
+                        body=file_metadata,
+                        media_body=media,
+                        fields='id',
+                        supportsAllDrives=True
+                    ).execute(num_retries=3),
+                    "Create Drive CSV",
+                )
                 file_id = response.get('id')
                 
             print(f"✅ Successfully uploaded '{filename}' to Google Drive (ID: {file_id}).")
@@ -291,39 +324,36 @@ class DataLoader:
             # Clear existing content
             worksheet.clear()
             
-            # BATCH UPLOAD LOGIC - handle large datasets
-            BATCH_SIZE = 10000  # 10k rows per batch to avoid API timeout
+            # Keep each request small enough for Google Sheets' payload and
+            # processing limits.  A row-count-only limit is unsafe because a
+            # wide worksheet can still create a multi-megabyte request.
+            max_cells_per_batch = 5_000
+            batch_size = max(1, min(500, max_cells_per_batch // max(1, len(headers))))
             total_rows = len(rows)
-            
-            if total_rows <= BATCH_SIZE:
-                # Small dataset - upload all at once
-                data = [headers] + rows
-                worksheet.update('A1', data, value_input_option='USER_ENTERED')
-            else:
-                # Large dataset - upload in batches
-                print(f"   📦 Large dataset detected. Uploading in batches of {BATCH_SIZE}...")
-                
-                # First batch includes headers
-                first_batch = [headers] + rows[:BATCH_SIZE]
-                worksheet.update('A1', first_batch, value_input_option='USER_ENTERED')
-                print(f"   ✅ Batch 1/{(total_rows // BATCH_SIZE) + 1} uploaded ({min(BATCH_SIZE, total_rows)} rows)")
-                
-                # Subsequent batches
-                batch_num = 2
-                for start_idx in range(BATCH_SIZE, total_rows, BATCH_SIZE):
-                    end_idx = min(start_idx + BATCH_SIZE, total_rows)
-                    batch_data = rows[start_idx:end_idx]
-                    
-                    # Calculate starting row (A1 is row 1, header is row 1, data starts row 2)
-                    start_row = start_idx + 2  # +1 for header, +1 for 1-indexing
-                    
-                    worksheet.update(f'A{start_row}', batch_data, value_input_option='USER_ENTERED')
-                    print(f"   ✅ Batch {batch_num}/{(total_rows // BATCH_SIZE) + 1} uploaded ({end_idx - start_idx} rows)")
-                    batch_num += 1
-                    
-                    # Small delay to avoid rate limiting
-                    import time
-                    time.sleep(1)
+
+            total_batches = max(1, math.ceil(total_rows / batch_size))
+            print(f"   📦 Uploading {total_rows} rows in {total_batches} batch(es) of up to {batch_size} rows...")
+            for batch_number, start_idx in enumerate(range(0, max(total_rows, 1), batch_size), start=1):
+                end_idx = min(start_idx + batch_size, total_rows)
+                batch_data = rows[start_idx:end_idx]
+                # First request also writes the header. Later writes begin at
+                # the exact row after the preceding batch, making retries safe.
+                if start_idx == 0:
+                    target_range = 'A1'
+                    payload = [headers] + batch_data
+                else:
+                    target_range = f'A{start_idx + 2}'
+                    payload = batch_data
+
+                self._retry_google_request(
+                    lambda target_range=target_range, payload=payload: worksheet.update(
+                        target_range, payload, value_input_option='USER_ENTERED'
+                    ),
+                    f"Upload batch {batch_number}/{total_batches}",
+                )
+                print(f"   ✅ Batch {batch_number}/{total_batches} uploaded ({end_idx - start_idx} rows)")
+                if batch_number < total_batches:
+                    time.sleep(0.25)
             
             print(f"✅ Successfully uploaded {total_rows} rows to {worksheet_name}.")
             
@@ -484,8 +514,23 @@ class DataLoader:
                 print(f"   📏 Expanding sheet by {rows_to_add} rows...")
                 worksheet.add_rows(rows_to_add)
             
-            # Append new rows
-            worksheet.update(f'A{next_row}', new_rows, value_input_option='USER_ENTERED')
+            # Append in bounded, retryable ranges. Retrying a fixed range is
+            # idempotent and cannot duplicate rows after an uncertain response.
+            max_cells_per_batch = 5_000
+            batch_size = max(1, min(500, max_cells_per_batch // max(1, len(existing_headers))))
+            total_batches = math.ceil(len(new_rows) / batch_size)
+            for batch_number, start_idx in enumerate(range(0, len(new_rows), batch_size), start=1):
+                batch = new_rows[start_idx:start_idx + batch_size]
+                target_range = f'A{next_row + start_idx}'
+                self._retry_google_request(
+                    lambda target_range=target_range, batch=batch: worksheet.update(
+                        target_range, batch, value_input_option='USER_ENTERED'
+                    ),
+                    f"Append batch {batch_number}/{total_batches}",
+                )
+                print(f"   ✅ Append batch {batch_number}/{total_batches} uploaded ({len(batch)} rows)")
+                if batch_number < total_batches:
+                    time.sleep(0.25)
             print(f"✅ Successfully appended {len(new_rows)} rows to {worksheet_name}.")
             
         except Exception as e:
